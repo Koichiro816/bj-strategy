@@ -114,6 +114,81 @@ def get_active_indexes(true_count, rules):
     return active
 
 
+def _up_to_int(d) -> int:
+    """インデックスエントリのディーラーカード表現を整数キーに変換する。"""
+    if d == "A":
+        return 11
+    return int(d) if isinstance(d, str) else d
+
+
+def apply_tc_overlay(base_table: dict, tc, rules) -> tuple:
+    """TCに応じてBSテーブルを調整する（UI・PDF共用）。
+
+    引数:
+      base_table: generate_strategy_table の出力 {'hard':…, 'soft':…, 'pair':…}
+      tc:         True Count (int or float)
+      rules:      HouseRules
+
+    返り値:
+      (adjusted_table, changed_cells)
+      changed_cells: set of ("hard"|"pair", row_key, upcard_int)
+
+    ルール:
+    - R（サレンダー）を S（スタンド）に格下げしない
+    - 負TC時の逆転は現在 S のセルのみ H に変更
+    """
+    adj = {k: dict(v) for k, v in base_table.items()}
+    changed: set = set()
+
+    for (h, d, thr, act) in ILLUSTRIOUS_18 + FAB_4:
+        if h == "Insurance":
+            continue
+        if h == "15" and d == "A" and rules.soft17 == "S17":
+            continue
+        if act == "R" and rules.surrender == "none":
+            continue
+        if act == "R" and not rules.surrender_vs_ace and d == "A":
+            continue
+        if not rules.dealer_peeks and act == "D" and _up_to_int(d) in (10, 11):
+            continue
+
+        up = _up_to_int(d)
+        hand_str = str(h)
+
+        if "," in hand_str:
+            rank = int(hand_str.split(",")[0])
+            k = (rank, up)
+            if k not in adj["pair"]:
+                continue
+            current = adj["pair"][k]
+            if tc >= thr:
+                if current == "R" and act == "S":
+                    continue
+                if current != act:
+                    adj["pair"][k] = act
+                    changed.add(("pair", rank, up))
+            elif act == "S" and current == "S":
+                adj["pair"][k] = "H"
+                changed.add(("pair", rank, up))
+        else:
+            total = int(hand_str)
+            k = (total, up)
+            if k not in adj["hard"]:
+                continue
+            current = adj["hard"][k]
+            if tc >= thr:
+                if current == "R" and act == "S":
+                    continue
+                if current != act:
+                    adj["hard"][k] = act
+                    changed.add(("hard", total, up))
+            elif act == "S" and current == "S":
+                adj["hard"][k] = "H"
+                changed.add(("hard", total, up))
+
+    return adj, changed
+
+
 if __name__ == "__main__":
     from rules import HouseRules
     r = HouseRules()

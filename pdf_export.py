@@ -2,7 +2,8 @@
 pdf_export.py — ベーシックストラテジー表のPDF出力
 
 ハード/ソフト/ペアの3テーブルを色分けして1つのPDFに出力する。
-インデックスプレイ一覧も任意で添付。reportlab を使用。
+TC overlay 適用済みテーブルにも対応。インデックスプレイ一覧も任意で添付。
+reportlab を使用。
 """
 
 from reportlab.lib import colors
@@ -14,7 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from rules import HouseRules
 from strategy import generate_strategy_table
-from index_plays import ILLUSTRIOUS_18, FAB_4
+from index_plays import ILLUSTRIOUS_18, FAB_4, apply_tc_overlay
 
 
 # アクション→色のマッピング（カラー）
@@ -25,6 +26,10 @@ ACTION_COLORS = {
     "P": colors.HexColor("#BBDEFB"),   # 薄青（スプリット）
     "R": colors.HexColor("#CE93D8"),   # 紫（サレンダー）
 }
+
+# TC変更セル用の色（app.py の TC_CELL_BG に対応）
+TC_CHANGED_BG   = colors.HexColor("#FFE0B2")
+TC_CHANGED_TEXT = colors.HexColor("#BF360C")
 
 ACTION_LABELS = {
     "H": "H (Hit)", "S": "S (Stand)", "D": "D (Double)",
@@ -44,12 +49,18 @@ def _up_label(up):
     return "A" if up == 11 else str(up)
 
 
-def _build_grid_table(data_dict, row_labels, row_keys, color: bool):
+def _build_grid_table(data_dict, row_labels, row_keys, color: bool,
+                      table_type: str = "hard", changed: set = None):
     """テーブル用の2次元データとスタイルを生成する。
 
-    row_labels: 各行の表示名
-    row_keys  : 各行のキー（data_dict検索用）
+    row_labels : 各行の表示名
+    row_keys   : 各行のキー（data_dict検索用）
+    table_type : "hard" / "soft" / "pair"（changed セットのタプル形式に対応）
+    changed    : apply_tc_overlay が返す changed_cells セット
     """
+    if changed is None:
+        changed = set()
+
     header = ["Hand"] + [_up_label(u) for u in UPCARDS]
     rows = [header]
     style_cmds = [
@@ -69,7 +80,15 @@ def _build_grid_table(data_dict, row_labels, row_keys, color: bool):
         for c_idx, up in enumerate(UPCARDS, start=1):
             act = data_dict.get((key, up), "")
             row.append(act)
-            if color and act in ACTION_COLORS:
+            is_changed = (table_type, key, up) in changed
+            if is_changed:
+                style_cmds.append(
+                    ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx), TC_CHANGED_BG))
+                style_cmds.append(
+                    ("TEXTCOLOR", (c_idx, r_idx), (c_idx, r_idx), TC_CHANGED_TEXT))
+                style_cmds.append(
+                    ("FONTNAME", (c_idx, r_idx), (c_idx, r_idx), "Helvetica-Bold"))
+            elif color and act in ACTION_COLORS:
                 style_cmds.append(
                     ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx),
                      ACTION_COLORS[act]))
@@ -78,33 +97,38 @@ def _build_grid_table(data_dict, row_labels, row_keys, color: bool):
     return rows, style_cmds
 
 
-def _hard_table(strategy_table, color):
+def _hard_table(strategy_table, color, changed=None):
     totals = list(range(17, 4, -1))  # 17..5 を上から
     labels = [str(t) for t in totals]
-    return _build_grid_table(strategy_table["hard"], labels, totals, color)
+    return _build_grid_table(strategy_table["hard"], labels, totals, color,
+                             table_type="hard", changed=changed)
 
 
-def _soft_table(strategy_table, color):
+def _soft_table(strategy_table, color, changed=None):
     # ソフト: total 20..13 を A+9..A+2 で表示
     totals = list(range(20, 12, -1))
     labels = [f"A,{t - 11}" for t in totals]
-    return _build_grid_table(strategy_table["soft"], labels, totals, color)
+    return _build_grid_table(strategy_table["soft"], labels, totals, color,
+                             table_type="soft", changed=changed)
 
 
-def _pair_table(strategy_table, color):
+def _pair_table(strategy_table, color, changed=None):
     ranks = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
     labels = []
     for r in ranks:
         labels.append("A,A" if r == 11 else f"{r},{r}")
-    return _build_grid_table(strategy_table["pair"], labels, ranks, color)
+    return _build_grid_table(strategy_table["pair"], labels, ranks, color,
+                             table_type="pair", changed=changed)
 
 
-def _legend_flowable(styles, color):
-    """色分け凡例を作る。"""
-    cells = [[ACTION_LABELS[a]] for a in ["H", "S", "D", "P", "R"]]
-    data = [["凡例 / Legend"]]
+def _legend_flowable(styles, color, has_tc_changes: bool = False):
+    """色分け凡例を作る。TC変更セルがある場合は追加エントリを表示。"""
+    data = [["Legend"]]
     for a in ["H", "S", "D", "P", "R"]:
         data.append([ACTION_LABELS[a]])
+    if has_tc_changes:
+        data.append(["* TC-adjusted"])
+
     t = Table(data, colWidths=[120])
     cmds = [
         ("FONTSIZE", (0, 0), (-1, -1), 7),
@@ -114,16 +138,34 @@ def _legend_flowable(styles, color):
     if color:
         for i, a in enumerate(["H", "S", "D", "P", "R"], start=1):
             cmds.append(("BACKGROUND", (0, i), (0, i), ACTION_COLORS[a]))
+    if has_tc_changes:
+        n = len(data) - 1
+        cmds.append(("BACKGROUND", (0, n), (0, n), TC_CHANGED_BG))
+        cmds.append(("TEXTCOLOR", (0, n), (0, n), TC_CHANGED_TEXT))
+        cmds.append(("FONTNAME", (0, n), (0, n), "Helvetica-Bold"))
     t.setStyle(TableStyle(cmds))
     return t
 
 
-def _index_table(rules):
-    """Illustrious 18 + Fab 4 のインデックス一覧テーブル。"""
+def _index_table(rules: HouseRules):
+    """Illustrious 18 + Fab 4 のインデックス一覧テーブル（ルール適用済み）。"""
     data = [["Hand", "Dealer", "Index(TC>=)", "Action"]]
     for (h, d, thr, act) in ILLUSTRIOUS_18 + FAB_4:
+        # H17限定プレイ（15 vs A）はS17では非表示
+        if h == "15" and d == "A" and rules.soft17 == "S17":
+            continue
+        # サレンダー不可の場合、Rインデックスは非表示
+        if act == "R" and rules.surrender == "none":
+            continue
+        # エース対面サレンダー不可の場合は除外
+        if act == "R" and d == "A" and not rules.surrender_vs_ace:
+            continue
+        # ENHC: dealer 10/A 対面のダブルインデックスは非表示
         dlabel = "A" if d in ("A", 11) else str(d)
+        if not rules.dealer_peeks and act == "D" and dlabel in ("10", "A"):
+            continue
         data.append([str(h), dlabel, f"{thr:+d}", act])
+
     t = Table(data, colWidths=[60, 50, 70, 50])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#37474F")),
@@ -148,16 +190,23 @@ def generate_pdf(
     """PDFを生成してパスを返す。
 
     引数:
-      strategy_table: generate_strategy_table の出力
+      strategy_table: generate_strategy_table の出力（ベースBS）
       rules         : HouseRules
       output_path   : 出力ファイルパス
       paper_size    : "A4"/"A5"/"Letter"
       color         : True=カラー, False=モノクロ
       include_index_plays : インデックス一覧を添付
-      true_count    : 表示用TC（参考表示のみ）
+      true_count    : True Count。0以外のとき TC overlay を適用してセルを橙色でハイライト
     """
     if paper_size not in PAPER_SIZES:
         raise ValueError(f"paper_size は A4/A5/Letter: {paper_size}")
+
+    # TC overlay 適用
+    changed: set = set()
+    if true_count != 0:
+        display_table, changed = apply_tc_overlay(strategy_table, true_count, rules)
+    else:
+        display_table = strategy_table
 
     page = landscape(PAPER_SIZES[paper_size])
     doc = SimpleDocTemplate(
@@ -175,15 +224,16 @@ def generate_pdf(
     elements.append(Paragraph("Blackjack Basic Strategy", title_style))
     elements.append(Paragraph(rules.short_description(), note_style))
     if true_count != 0:
-        elements.append(Paragraph(
-            f"True Count = {true_count:+d} 反映済み（インデックスプレイ参照）",
-            note_style))
+        tc_note = f"TC = {true_count:+d} index plays applied"
+        if changed:
+            tc_note += f" ({len(changed)} cells adjusted, shown in orange)"
+        elements.append(Paragraph(tc_note, note_style))
     elements.append(Spacer(1, 4 * mm))
 
     # 3テーブルを横並びにするため、それぞれTableを作りまとめる
-    hard_rows, hard_style = _hard_table(strategy_table, color)
-    soft_rows, soft_style = _soft_table(strategy_table, color)
-    pair_rows, pair_style = _pair_table(strategy_table, color)
+    hard_rows, hard_style = _hard_table(display_table, color, changed)
+    soft_rows, soft_style = _soft_table(display_table, color, changed)
+    pair_rows, pair_style = _pair_table(display_table, color, changed)
 
     cw = [22] + [16] * 10
     hard_t = Table(hard_rows, colWidths=cw)
@@ -203,7 +253,7 @@ def generate_pdf(
         ]))
         return inner
 
-    legend = _legend_flowable(styles, color)
+    legend = _legend_flowable(styles, color, has_tc_changes=bool(changed))
 
     # 横3列: ハード / ソフト / ペア
     layout = Table([[
@@ -232,5 +282,10 @@ def generate_pdf(
 if __name__ == "__main__":
     r = HouseRules()
     table = generate_strategy_table(r)
+    # TC=0（ベースBS）
     path = generate_pdf(table, r, "bs_test.pdf", paper_size="A5", color=True)
-    print("PDF生成:", path)
+    print("PDF生成（TC=0）:", path)
+    # TC=+3 でのオーバーレイテスト
+    path2 = generate_pdf(table, r, "bs_test_tc3.pdf", paper_size="A4", color=True,
+                         true_count=3)
+    print("PDF生成（TC=+3）:", path2)

@@ -11,7 +11,7 @@ import streamlit as st
 from rules import HouseRules
 from strategy import generate_strategy_table
 from index_plays import (ILLUSTRIOUS_18, FAB_4, get_active_indexes,
-                         should_take_insurance)
+                         should_take_insurance, apply_tc_overlay)
 from simulator import SimConfig, simulate
 from pdf_export import generate_pdf
 
@@ -331,85 +331,6 @@ rules_dict = dict(
 )
 strategy_table = _cached_table(tuple(sorted(rules_dict.items())))
 
-
-# ===========================================================================
-# TC オーバーレイ（双方向 + R→S 格下げ防止）
-# ===========================================================================
-def _norm_d(d):
-    if d == "A":
-        return 11
-    return int(d) if isinstance(d, str) else d
-
-
-def apply_tc_overlay(base_table, tc, rules):
-    """TC に応じてベーシックストラテジー表を調整する。
-
-    正のTCでは Illustrious18/Fab4 のインデックスプレイを適用。
-    負のTC（マイナスカウント）では Stand 系インデックスを逆転（Hit に）。
-
-    不変ルール:
-    - R（サレンダー）を S（スタンド）に格下げしない
-      （サレンダーは常にスタンドより EV が良いか同等のため）
-    - 負TC時の逆転は「現在 S を表示しているセル → H に変更」のみ
-    """
-    adj = {k: dict(v) for k, v in base_table.items()}
-    changed = set()
-
-    for (h, d, thr, act) in ILLUSTRIOUS_18 + FAB_4:
-        if h == "Insurance":
-            continue
-        # H17 限定の Fab4（15 vs A）は S17 では不適用
-        if h == "15" and d == "A" and rules.soft17 == "S17":
-            continue
-        # サレンダー不可のときは R インデックスをスキップ
-        if act == "R" and rules.surrender == "none":
-            continue
-        if act == "R" and not rules.surrender_vs_ace and d == "A":
-            continue
-        # ENHC: dealer 10/A は BJ リスクあり → D インデックスは不適用
-        # dealer 10+A(BJ)=1/13, dealer A+10(BJ)=4/13 → どちらもダブルEVを押し下げる
-        if not rules.dealer_peeks and act == "D" and _norm_d(d) in (10, 11):
-            continue
-
-        up = _norm_d(d)
-        hand_str = str(h)
-
-        if "," in hand_str:
-            rank = int(hand_str.split(",")[0])
-            k = (rank, up)
-            if k not in adj["pair"]:
-                continue
-            current = adj["pair"][k]
-            if tc >= thr:
-                # R を S に格下げしない
-                if current == "R" and act == "S":
-                    continue
-                if current != act:
-                    adj["pair"][k] = act
-                    changed.add(("pair", rank, up))
-            elif act == "S" and current == "S":
-                # 負TC逆転: Stand インデックスが発動しない TC では Hit に戻す
-                adj["pair"][k] = "H"
-                changed.add(("pair", rank, up))
-        else:
-            total = int(hand_str)
-            k = (total, up)
-            if k not in adj["hard"]:
-                continue
-            current = adj["hard"][k]
-            if tc >= thr:
-                # R を S に格下げしない
-                if current == "R" and act == "S":
-                    continue
-                if current != act:
-                    adj["hard"][k] = act
-                    changed.add(("hard", total, up))
-            elif act == "S" and current == "S":
-                # 負TC逆転: Stand インデックスが発動しない TC では Hit に戻す
-                adj["hard"][k] = "H"
-                changed.add(("hard", total, up))
-
-    return adj, changed
 
 
 # ===========================================================================

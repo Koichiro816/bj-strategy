@@ -1,5 +1,14 @@
 __pycache__/
 *.pyc
 *.pyo
-.streamlit/secrets.toml
+
+# ローカルで生成されたテストPDF
 *.pdf
+
+# Streamlit secrets（パスワード等）
+.streamlit/secrets.toml
+.env
+
+# OS
+.DS_Store
+Thumbs.db
