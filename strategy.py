@@ -358,20 +358,26 @@ def generate_strategy_table(rules: HouseRules) -> dict:
             can_split = True
             if rank == 11 and not rules.split_aces:
                 can_split = False
+            # ペアもサレンダー可能（surrender_vs_ace ルールに従う）
+            can_surr_pair = (rules.surrender != "none" and
+                             (up != 11 or rules.surrender_vs_ace))
             act = best_action(total, soft=is_soft, is_pair=True,
                               dealer_upcard=up, can_double=(rank != 11),
-                              can_split=can_split, can_surrender=False,
+                              can_split=can_split, can_surrender=can_surr_pair,
                               rules=rules, pair_rank=rank)
             table["pair"][(rank, up)] = act
 
-    # 無限デッキ近似の誤差補正: S17ゲームでの既知の偏差を標準6D BSに揃える
+    # 無限デッキ近似の誤差補正: 既知の偏差を 6D 標準 BS に揃える
     if rules.soft17 == "S17":
-        # Hard 11 vs A: 無限デッキ → H, 6D S17 HC標準 → D
-        # ENHC/ANHC ではディーラーBJリスク(P=4/13)がdoubleを著しく不利にするため
-        # 自然EV計算結果(H)が正しく、補正は HC のみに適用する
+        # Hard 11 vs A: 無限デッキ → H, 6D S17 HC → D
+        # ENHC では BJ リスク(P=4/13)で D が著しく不利 → 補正は HC のみ
         if rules.can_double_total(11) and rules.dealer_peeks:
             table["hard"][(11, 11)] = "D"
-        # 以下はアップカード2・5 → BJ リスクなし → HC/ENHC 共通
+        # Hard 11 vs 10 (ENHC): 無限デッキで H/D がほぼ同値 (margin≈0.0003)
+        # 6D ENHC では 10-upcard の BJ リスク(P=1/13)を考慮しても D が正解
+        if rules.can_double_total(11) and not rules.dealer_peeks:
+            table["hard"][(11, 10)] = "D"
+        # ソフトハンド補正: アップカード 2・5 → BJ リスクなし → HC/ENHC 共通
         if rules.can_double_total(18):
             table["soft"][(18, 2)] = "D"
         if rules.can_double_total(17):
