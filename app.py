@@ -650,7 +650,12 @@ with tab4:
         color_mode = st.radio("カラー", ["カラー", "モノクロ"], horizontal=True)
     with pcol3:
         pdf_tc = st.number_input("True Count（参考表示）", -5, 5, 0)
-    include_idx = st.checkbox("インデックスプレイを含める", value=True)
+    pdf_chk1, pdf_chk2 = st.columns(2)
+    with pdf_chk1:
+        include_idx = st.checkbox("インデックスプレイを含める", value=True)
+    with pdf_chk2:
+        pdf_show_ev = st.checkbox("EV表示", value=False,
+                                  help="各マスにアクションとEV（期待値）を表示します。")
 
     if st.button("PDF 生成", type="primary"):
         try:
@@ -662,6 +667,7 @@ with tab4:
                 color=(color_mode == "カラー"),
                 include_index_plays=include_idx,
                 true_count=int(pdf_tc),
+                show_ev=pdf_show_ev,
             )
             with open(tmp.name, "rb") as f:
                 pdf_bytes = f.read()

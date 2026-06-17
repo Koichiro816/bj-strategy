@@ -14,7 +14,7 @@ from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from rules import HouseRules
-from strategy import generate_strategy_table
+from strategy import generate_strategy_table, generate_ev_table
 from index_plays import ILLUSTRIOUS_18, FAB_4, apply_tc_overlay
 
 
@@ -49,6 +49,15 @@ def _up_label(up):
     return "A" if up == 11 else str(up)
 
 
+def _fmt_ev(v: float) -> str:
+    """EV値を狹いセル幅でも折り返さないよう先頭の0を省いた短い表記にする
+    （例: +0.123 -> '+.12', -0.500 -> '-.50'）。"""
+    s = f"{v:+.2f}"
+    if s[1] == "0":
+        s = s[0] + s[2:]
+    return s
+
+
 # 横並びにする3テーブル分のレイアウトパディング（titled()内のLEFTPADDING+RIGHTPADDING）
 _LAYOUT_H_PAD = 8  # 4 + 4
 _N_TABLES = 3
@@ -68,16 +77,23 @@ def _table_col_widths(avail_width: float) -> list:
 
 
 def _build_grid_table(data_dict, row_labels, row_keys, color: bool,
-                      table_type: str = "hard", changed: set = None):
+                      table_type: str = "hard", changed: set = None,
+                      ev_dict: dict = None):
     """テーブル用の2次元データとスタイルを生成する。
 
     row_labels : 各行の表示名
     row_keys   : 各行のキー（data_dict検索用）
     table_type : "hard" / "soft" / "pair"（changed セットのタプル形式に対応）
     changed    : apply_tc_overlay が返す changed_cells セット
+    ev_dict    : 指定すると各セルにアクション文字+EV値を2行で表示する
     """
     if changed is None:
         changed = set()
+
+    # EV表示時はセル内が2行になるため、行高さを抑えるためフォントを縮小する
+    act_font = 6.0 if ev_dict is not None else 7.0
+    ev_font = 4.3
+    cell_padding = 1.0 if ev_dict is not None else 1.5
 
     header = ["Hand"] + [_up_label(u) for u in UPCARDS]
     rows = [header]
@@ -91,8 +107,8 @@ def _build_grid_table(data_dict, row_labels, row_keys, color: bool,
         ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
         ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#ECEFF1")),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ("TOPPADDING", (0, 0), (-1, -1), cell_padding),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), cell_padding),
         ("LEFTPADDING", (0, 0), (-1, -1), 2),
         ("RIGHTPADDING", (0, 0), (-1, -1), 2),
     ]
@@ -101,15 +117,31 @@ def _build_grid_table(data_dict, row_labels, row_keys, color: bool,
         row = [label]
         for c_idx, up in enumerate(UPCARDS, start=1):
             act = data_dict.get((key, up), "")
-            row.append(act)
             is_changed = (table_type, key, up) in changed
+            text_color = TC_CHANGED_TEXT if is_changed else colors.black
+
+            if ev_dict is not None:
+                ev_val = ev_dict.get((key, up))
+                ev_str = _fmt_ev(ev_val) if ev_val is not None else ""
+                cell_style = ParagraphStyle(
+                    f"cell_{table_type}_{r_idx}_{c_idx}",
+                    fontName="Helvetica-Bold", alignment=1, leading=act_font + 1,
+                    textColor=text_color)
+                cell_html = (f'<font size="{act_font}">{act}</font><br/>'
+                            f'<font size="{ev_font}">{ev_str}</font>')
+                cell_value = Paragraph(cell_html, cell_style)
+            else:
+                cell_value = act
+
+            row.append(cell_value)
             if is_changed:
                 style_cmds.append(
                     ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx), TC_CHANGED_BG))
-                style_cmds.append(
-                    ("TEXTCOLOR", (c_idx, r_idx), (c_idx, r_idx), TC_CHANGED_TEXT))
-                style_cmds.append(
-                    ("FONTNAME", (c_idx, r_idx), (c_idx, r_idx), "Helvetica-Bold"))
+                if ev_dict is None:
+                    style_cmds.append(
+                        ("TEXTCOLOR", (c_idx, r_idx), (c_idx, r_idx), TC_CHANGED_TEXT))
+                    style_cmds.append(
+                        ("FONTNAME", (c_idx, r_idx), (c_idx, r_idx), "Helvetica-Bold"))
             elif color and act in ACTION_COLORS:
                 style_cmds.append(
                     ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx),
@@ -119,28 +151,31 @@ def _build_grid_table(data_dict, row_labels, row_keys, color: bool,
     return rows, style_cmds
 
 
-def _hard_table(strategy_table, color, changed=None):
+def _hard_table(strategy_table, color, changed=None, ev_table=None):
     totals = list(range(17, 4, -1))  # 17..5 を上から
     labels = [str(t) for t in totals]
+    ev_dict = ev_table["hard"] if ev_table else None
     return _build_grid_table(strategy_table["hard"], labels, totals, color,
-                             table_type="hard", changed=changed)
+                             table_type="hard", changed=changed, ev_dict=ev_dict)
 
 
-def _soft_table(strategy_table, color, changed=None):
+def _soft_table(strategy_table, color, changed=None, ev_table=None):
     # ソフト: total 20..13 を A+9..A+2 で表示
     totals = list(range(20, 12, -1))
     labels = [f"A,{t - 11}" for t in totals]
+    ev_dict = ev_table["soft"] if ev_table else None
     return _build_grid_table(strategy_table["soft"], labels, totals, color,
-                             table_type="soft", changed=changed)
+                             table_type="soft", changed=changed, ev_dict=ev_dict)
 
 
-def _pair_table(strategy_table, color, changed=None):
+def _pair_table(strategy_table, color, changed=None, ev_table=None):
     ranks = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
     labels = []
     for r in ranks:
         labels.append("A,A" if r == 11 else f"{r},{r}")
+    ev_dict = ev_table["pair"] if ev_table else None
     return _build_grid_table(strategy_table["pair"], labels, ranks, color,
-                             table_type="pair", changed=changed)
+                             table_type="pair", changed=changed, ev_dict=ev_dict)
 
 
 def _legend_flowable(styles, color, has_tc_changes: bool = False):
@@ -212,6 +247,7 @@ def generate_pdf(
     color: bool = True,
     include_index_plays: bool = True,
     true_count: int = 0,
+    show_ev: bool = False,
 ) -> str:
     """PDFを生成してパスを返す。
 
@@ -223,6 +259,7 @@ def generate_pdf(
       color         : True=カラー, False=モノクロ
       include_index_plays : インデックス一覧を添付
       true_count    : True Count。0以外のとき TC overlay を適用してセルを橙色でハイライト
+      show_ev       : Trueの場合、各セルにアクション文字とEV値を表示する
     """
     if paper_size not in PAPER_SIZES:
         raise ValueError(f"paper_size は A4/A5/Letter: {paper_size}")
@@ -233,6 +270,9 @@ def generate_pdf(
         display_table, changed = apply_tc_overlay(strategy_table, true_count, rules)
     else:
         display_table = strategy_table
+
+    # EV表示: 表示中アクションのEVをTCに応じて計算する
+    ev_table = generate_ev_table(display_table, rules, tc=true_count) if show_ev else None
 
     page = landscape(PAPER_SIZES[paper_size])
     margin = 10 * mm
@@ -254,7 +294,12 @@ def generate_pdf(
     elements = []
     page1 = []  # ベーシックストラテジー表+凡例: 1ページに収めるためKeepTogetherでまとめる
     page1.append(Paragraph("Blackjack Basic Strategy", title_style))
-    page1.append(Paragraph(rules.short_description(), note_style))
+    desc_text = rules.short_description()
+    if show_ev:
+        # 新規段落を追加すると高さが増えて1ページに収まらなくなるため、
+        # 既存の説明行に追記して高さの増分を避ける
+        desc_text += "  |  Cell shows: Action / EV per unit bet"
+    page1.append(Paragraph(desc_text, note_style))
 
     # True Count は常に明記する（TC=0でもベース戦略であることを示す）
     if true_count == 0:
@@ -267,9 +312,9 @@ def generate_pdf(
     page1.append(Spacer(1, 4 * mm))
 
     # 3テーブルを横並びにするため、それぞれTableを作りまとめる
-    hard_rows, hard_style = _hard_table(display_table, color, changed)
-    soft_rows, soft_style = _soft_table(display_table, color, changed)
-    pair_rows, pair_style = _pair_table(display_table, color, changed)
+    hard_rows, hard_style = _hard_table(display_table, color, changed, ev_table)
+    soft_rows, soft_style = _soft_table(display_table, color, changed, ev_table)
+    pair_rows, pair_style = _pair_table(display_table, color, changed, ev_table)
 
     cw = _table_col_widths(avail_width)
     hard_t = Table(hard_rows, colWidths=cw)
