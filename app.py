@@ -6,6 +6,7 @@ import os
 import tempfile
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from rules import HouseRules
@@ -606,11 +607,11 @@ with tab3:
         st.markdown("**ベットスプレッド（TC 閾値 → 倍率）**")
         c1, c2, c3 = st.columns(3)
         with c1:
-            m1 = st.number_input("TC ≥ +1 倍率", 1.0, 50.0, 2.0)
+            m1 = st.number_input("TC ≥ +1 倍率", 1, 50, 2, step=1)
         with c2:
-            m2 = st.number_input("TC ≥ +2 倍率", 1.0, 50.0, 4.0)
+            m2 = st.number_input("TC ≥ +2 倍率", 1, 50, 4, step=1)
         with c3:
-            m3 = st.number_input("TC ≥ +3 倍率", 1.0, 50.0, 6.0)
+            m3 = st.number_input("TC ≥ +3 倍率", 1, 50, 6, step=1)
         bet_spread = {1: m1, 2: m2, 3: m3}
 
     if st.button("シミュレーション実行", type="primary"):
@@ -647,14 +648,23 @@ with tab3:
         if res.bankroll_curve:
             sample_every = max(1, res.curve_sample_every)
             hand_index = [i * sample_every for i in range(len(res.bankroll_curve))]
-            curve_df = pd.DataFrame(
-                {"累積純利益（min_bet単位）": res.bankroll_curve},
-                index=pd.Index(hand_index, name="ハンド数"))
-            st.line_chart(curve_df)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=hand_index, y=res.bankroll_curve, mode="lines",
+                name="累積純利益", line=dict(color="#1f77b4"),
+                hovertemplate="ハンド数: %{x:,}<br>累積純利益: %{y:,.1f} 単位<extra></extra>"))
+            fig.update_layout(
+                xaxis_title="ハンド数", yaxis_title="累積純利益（min_bet単位）",
+                margin=dict(l=10, r=10, t=10, b=10), height=400,
+                xaxis=dict(rangeslider=dict(visible=True), type="linear"),
+                hovermode="x unified")
+            st.plotly_chart(fig, use_container_width=True)
             st.caption(
                 f"全 {res.num_hands:,} 手のシミュレーション結果を、"
                 f"{sample_every:,} 手ごとに{len(res.bankroll_curve):,} 点サンプリングして"
-                "累積純利益の推移を表示しています（横軸＝経過ハンド数）。")
+                "累積純利益の推移を表示しています（横軸＝経過ハンド数）。"
+                "グラフはドラッグでズーム、下部のスライダーで範囲選択、"
+                "ダブルクリックで全体表示にリセットできます。")
 
         if use_counting:
             st.info(
