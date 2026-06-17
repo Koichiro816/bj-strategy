@@ -10,7 +10,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, A5, letter, landscape
 from reportlab.lib.units import mm
 from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
-                                Paragraph, Spacer)
+                                Paragraph, Spacer, KeepTogether, PageBreak)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from rules import HouseRules
@@ -49,6 +49,24 @@ def _up_label(up):
     return "A" if up == 11 else str(up)
 
 
+# 横並びにする3テーブル分のレイアウトパディング（titled()内のLEFTPADDING+RIGHTPADDING）
+_LAYOUT_H_PAD = 8  # 4 + 4
+_N_TABLES = 3
+
+
+def _table_col_widths(avail_width: float) -> list:
+    """用紙の利用可能幅から、Hard/Soft/Pairsの3テーブルが重ならずに収まる
+    列幅（Hand列 + アップカード10列）を計算する。
+
+    A5など幅が狭い用紙では固定幅(22+16*10=182pt)では3テーブル合計が
+    利用可能幅を超え表が重なって表示されるため、ページ幅に応じて動的に縮小する。
+    """
+    per_table = (avail_width - _N_TABLES * _LAYOUT_H_PAD) / _N_TABLES
+    label_w = per_table * (22 / 182)
+    upcard_w = (per_table - label_w) / 10
+    return [label_w] + [upcard_w] * 10
+
+
 def _build_grid_table(data_dict, row_labels, row_keys, color: bool,
                       table_type: str = "hard", changed: set = None):
     """テーブル用の2次元データとスタイルを生成する。
@@ -73,6 +91,10 @@ def _build_grid_table(data_dict, row_labels, row_keys, color: bool,
         ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
         ("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#ECEFF1")),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
     ]
 
     for r_idx, (label, key) in enumerate(zip(row_labels, row_keys), start=1):
@@ -122,26 +144,30 @@ def _pair_table(strategy_table, color, changed=None):
 
 
 def _legend_flowable(styles, color, has_tc_changes: bool = False):
-    """色分け凡例を作る。TC変更セルがある場合は追加エントリを表示。"""
-    data = [["Legend"]]
-    for a in ["H", "S", "D", "P", "R"]:
-        data.append([ACTION_LABELS[a]])
+    """色分け凡例を作る（横1行レイアウトで省スペース化）。
+    TC変更セルがある場合は追加エントリを表示。"""
+    labels = [ACTION_LABELS[a] for a in ["H", "S", "D", "P", "R"]]
     if has_tc_changes:
-        data.append(["* TC-adjusted"])
+        labels.append("* TC-adjusted")
+    data = [labels]
 
-    t = Table(data, colWidths=[120])
+    t = Table(data)
     cmds = [
         ("FONTSIZE", (0, 0), (-1, -1), 7),
-        ("FONTNAME", (0, 0), (0, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]
     if color:
-        for i, a in enumerate(["H", "S", "D", "P", "R"], start=1):
-            cmds.append(("BACKGROUND", (0, i), (0, i), ACTION_COLORS[a]))
+        for i, a in enumerate(["H", "S", "D", "P", "R"]):
+            cmds.append(("BACKGROUND", (i, 0), (i, 0), ACTION_COLORS[a]))
     if has_tc_changes:
-        n = len(data) - 1
-        cmds.append(("BACKGROUND", (0, n), (0, n), TC_CHANGED_BG))
-        cmds.append(("TEXTCOLOR", (0, n), (0, n), TC_CHANGED_TEXT))
+        n = len(labels) - 1
+        cmds.append(("BACKGROUND", (n, 0), (n, 0), TC_CHANGED_BG))
+        cmds.append(("TEXTCOLOR", (n, 0), (n, 0), TC_CHANGED_TEXT))
         cmds.append(("FONTNAME", (0, n), (0, n), "Helvetica-Bold"))
     t.setStyle(TableStyle(cmds))
     return t
@@ -166,7 +192,7 @@ def _index_table(rules: HouseRules):
             continue
         data.append([str(h), dlabel, f"{thr:+d}", act])
 
-    t = Table(data, colWidths=[60, 50, 70, 50])
+    t = Table(data, colWidths=[60, 50, 70, 50], repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#37474F")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -209,11 +235,13 @@ def generate_pdf(
         display_table = strategy_table
 
     page = landscape(PAPER_SIZES[paper_size])
+    margin = 10 * mm
     doc = SimpleDocTemplate(
         output_path, pagesize=page,
-        topMargin=10 * mm, bottomMargin=10 * mm,
-        leftMargin=10 * mm, rightMargin=10 * mm,
+        topMargin=margin, bottomMargin=margin,
+        leftMargin=margin, rightMargin=margin,
     )
+    avail_width = page[0] - 2 * margin
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("title", parent=styles["Title"], fontSize=14)
@@ -221,21 +249,22 @@ def generate_pdf(
     note_style = ParagraphStyle("note", parent=styles["Normal"], fontSize=7)
 
     elements = []
-    elements.append(Paragraph("Blackjack Basic Strategy", title_style))
-    elements.append(Paragraph(rules.short_description(), note_style))
+    page1 = []  # ベーシックストラテジー表+凡例: 1ページに収めるためKeepTogetherでまとめる
+    page1.append(Paragraph("Blackjack Basic Strategy", title_style))
+    page1.append(Paragraph(rules.short_description(), note_style))
     if true_count != 0:
         tc_note = f"TC = {true_count:+d} index plays applied"
         if changed:
             tc_note += f" ({len(changed)} cells adjusted, shown in orange)"
-        elements.append(Paragraph(tc_note, note_style))
-    elements.append(Spacer(1, 4 * mm))
+        page1.append(Paragraph(tc_note, note_style))
+    page1.append(Spacer(1, 4 * mm))
 
     # 3テーブルを横並びにするため、それぞれTableを作りまとめる
     hard_rows, hard_style = _hard_table(display_table, color, changed)
     soft_rows, soft_style = _soft_table(display_table, color, changed)
     pair_rows, pair_style = _pair_table(display_table, color, changed)
 
-    cw = [22] + [16] * 10
+    cw = _table_col_widths(avail_width)
     hard_t = Table(hard_rows, colWidths=cw)
     hard_t.setStyle(TableStyle(hard_style))
     soft_t = Table(soft_rows, colWidths=cw)
@@ -266,12 +295,13 @@ def generate_pdf(
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ]))
-    elements.append(layout)
-    elements.append(Spacer(1, 4 * mm))
-    elements.append(legend)
+    page1.append(layout)
+    page1.append(Spacer(1, 4 * mm))
+    page1.append(legend)
+    elements.append(KeepTogether(page1))
 
     if include_index_plays:
-        elements.append(Spacer(1, 4 * mm))
+        elements.append(PageBreak())
         elements.append(Paragraph("Illustrious 18 + Fab 4 (Hi-Lo Indexes)", h_style))
         elements.append(_index_table(rules))
 
