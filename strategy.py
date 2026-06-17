@@ -312,6 +312,47 @@ def best_action(player_total: int, soft: bool, is_pair: bool,
     return best
 
 
+def _action_ev(action: str, player_total: int, soft: bool, dealer_upcard: int,
+              rules: HouseRules, pair_rank: int = 0) -> float:
+    """指定アクションを実行した場合のEVを計算する（表示用）。"""
+    if action == "R":
+        return ev_surrender()
+    if action == "D":
+        return ev_double(player_total, soft, dealer_upcard, rules)
+    if action == "P":
+        return ev_split(pair_rank, dealer_upcard, rules)
+    if action == "H":
+        return ev_hit(player_total, soft, dealer_upcard, rules)
+    # "S"（スタンド）がデフォルト
+    h17 = rules.soft17 == "H17"
+    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks)
+    dealer_probs = {
+        17: dprobs[0], 18: dprobs[1], 19: dprobs[2],
+        20: dprobs[3], 21: dprobs[4], "bust": dprobs[5],
+    }
+    return ev_stand(player_total, dealer_probs)
+
+
+def generate_ev_table(table: dict, rules: HouseRules) -> dict:
+    """戦略テーブルの各セルについて、表示中アクションのEVを計算した辞書を返す。
+
+    table: generate_strategy_table() の出力、または TC overlay 適用後のテーブル。
+           表示中のアクションに対するEVを返すため、overlay適用後でも対応可能。
+    返り値: table と同じキー構造（'hard'/'soft'/'pair'）でEV(float)を保持。
+    """
+    ev_table = {"hard": {}, "soft": {}, "pair": {}}
+    for (total, up), act in table["hard"].items():
+        ev_table["hard"][(total, up)] = _action_ev(act, total, False, up, rules)
+    for (total, up), act in table["soft"].items():
+        ev_table["soft"][(total, up)] = _action_ev(act, total, True, up, rules)
+    for (rank, up), act in table["pair"].items():
+        total = rank * 2 if rank != 11 else 12
+        is_soft = rank == 11
+        ev_table["pair"][(rank, up)] = _action_ev(
+            act, total, is_soft, up, rules, pair_rank=rank)
+    return ev_table
+
+
 # ---------------------------------------------------------------------------
 # BSテーブル生成
 # ---------------------------------------------------------------------------

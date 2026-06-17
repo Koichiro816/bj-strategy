@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from rules import HouseRules
-from strategy import generate_strategy_table
+from strategy import generate_strategy_table, generate_ev_table
 from index_plays import (ILLUSTRIOUS_18, FAB_4, get_active_indexes,
                          should_take_insurance, apply_tc_overlay)
 from simulator import SimConfig, simulate
@@ -353,7 +353,7 @@ def _cell_style(act, is_changed):
 
 
 def render_strategy_html(data_dict, row_keys, row_labels,
-                         table_type="hard", changed=None):
+                         table_type="hard", changed=None, ev_dict=None):
     if changed is None:
         changed = set()
     html = [
@@ -392,8 +392,17 @@ def render_strategy_html(data_dict, row_keys, row_labels,
             act = data_dict.get((key, u), "")
             is_chg = (table_type, key, u) in changed
             cs = _cell_style(act, is_chg)
+            if ev_dict is not None:
+                ev_val = ev_dict.get((key, u))
+                ev_str = f"{ev_val:+.3f}" if ev_val is not None else ""
+                cell_content = (
+                    f'<div>{act}</div>'
+                    f'<div style="font-size:0.62rem;font-weight:500;opacity:0.85;">'
+                    f'{ev_str}</div>')
+            else:
+                cell_content = act
             html.append(
-                f'<td style="{cs}padding:5px 4px;{_BORDER};">{act}</td>')
+                f'<td style="{cs}padding:5px 4px;{_BORDER};">{cell_content}</td>')
         html.append('</tr>')
     html.append('</table></div>')
     return "".join(html)
@@ -456,18 +465,25 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.subheader("ベーシックストラテジー")
 
-    tab1_tc = st.select_slider(
-        "True Count (TC)",
-        options=list(range(-5, 6)),
-        value=0,
-        format_func=lambda x: f"TC {x:+d}",
-    )
+    tc1_col, tc2_col = st.columns([3, 1])
+    with tc1_col:
+        tab1_tc = st.select_slider(
+            "True Count (TC)",
+            options=list(range(-5, 6)),
+            value=0,
+            format_func=lambda x: f"TC {x:+d}",
+        )
+    with tc2_col:
+        show_ev = st.checkbox("EV表示", value=False,
+                              help="各マスに最善アクションのEV（期待値）を表示します。")
 
     if tab1_tc == 0:
         display_table = strategy_table
         changed_cells: set = set()
     else:
         display_table, changed_cells = apply_tc_overlay(strategy_table, tab1_tc, rules)
+
+    ev_table = generate_ev_table(display_table, rules) if show_ev else None
 
     if should_take_insurance(tab1_tc):
         st.success(f"TC {tab1_tc:+d} → インシュランスを取る（TC ≥ +3）")
@@ -487,7 +503,8 @@ with tab1:
             render_strategy_html(
                 display_table["hard"], hard_totals,
                 [str(t) for t in hard_totals],
-                table_type="hard", changed=changed_cells)),
+                table_type="hard", changed=changed_cells,
+                ev_dict=ev_table["hard"] if ev_table else None)),
         unsafe_allow_html=True)
 
     st.markdown(
@@ -496,7 +513,8 @@ with tab1:
             render_strategy_html(
                 display_table["soft"], soft_totals,
                 [f"A,{t - 11}" for t in soft_totals],
-                table_type="soft", changed=changed_cells)),
+                table_type="soft", changed=changed_cells,
+                ev_dict=ev_table["soft"] if ev_table else None)),
         unsafe_allow_html=True)
 
     st.markdown(
@@ -505,12 +523,17 @@ with tab1:
             render_strategy_html(
                 display_table["pair"], pair_ranks,
                 ["A,A" if r == 11 else f"{r},{r}" for r in pair_ranks],
-                table_type="pair", changed=changed_cells)),
+                table_type="pair", changed=changed_cells,
+                ev_dict=ev_table["pair"] if ev_table else None)),
         unsafe_allow_html=True)
 
     st.caption(
         "無限デッキ近似による解析的BS。6D 標準BSとの既知差異は補正済み。"
         " ENHC/ANHC 選択時はノーホールカードルールが自動反映されます。")
+    if show_ev:
+        st.caption(
+            "EVは賭け金1単位あたりの期待値（無限デッキ近似・TC=0中立カウント前提）。"
+            " TCインデックス発動セルは変更後アクションのEVを表示します。")
 
 # ---------------------------------------------------------------------------
 # Tab 2: インデックスプレイ
