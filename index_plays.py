@@ -48,6 +48,21 @@ FAB_4 = [
 # 動的閾値を探索するTCの範囲（UIのTCスライダー実用範囲 -5..+5 に余裕を持たせた値）
 _TC_SCAN_RANGE = range(-6, 7)
 
+# get_filtered_indexes() の結果キャッシュ（rules固有のキーで保持）。
+# 同じrulesに対する結果は不変なため、シミュレーションの全ハンド・全判断で
+# 毎回再計算すると非常に重くなる（数百万〜千万ハンド規模で致命的）。
+_FILTERED_CACHE: dict = {}
+
+
+def _rules_key(rules):
+    """戦略・EV計算に影響する属性のみで構成したハッシュ可能なキーを返す。
+    penetrationはシュー管理専用でEV計算には使わないため除外する。
+    """
+    return (rules.num_decks, rules.blackjack_pays, rules.dealer_peeks,
+            rules.soft17, rules.double_allowed, rules.double_after_split,
+            rules.split_aces, rules.draw_to_split_aces, rules.max_splits,
+            rules.surrender, rules.surrender_vs_ace)
+
 
 def _normalize_upcard(up):
     """アップカード表現を正規化する。文字'A'と数値11を相互に許容。"""
@@ -109,12 +124,26 @@ def _compute_deviations(hand_str, dealer_upcard, rules):
     return results
 
 
+_INSURANCE_THRESHOLD_CACHE = None
+_INSURANCE_THRESHOLD_COMPUTED = False
+
+
 def _insurance_threshold():
-    """インシュランスが得になる最小のTCを動的に計算する（EV = 3*p(10) - 1 >= 0）。"""
+    """インシュランスが得になる最小のTCを動的に計算する（EV = 3*p(10) - 1 >= 0）。
+
+    rulesに依存せず常に同じ値になるため、初回計算後はキャッシュを返す。
+    """
+    global _INSURANCE_THRESHOLD_CACHE, _INSURANCE_THRESHOLD_COMPUTED
+    if _INSURANCE_THRESHOLD_COMPUTED:
+        return _INSURANCE_THRESHOLD_CACHE
+    result = None
     for tc in _TC_SCAN_RANGE:
         if 3 * card_prob_tc(10, tc) - 1 >= 0:
-            return tc
-    return None
+            result = tc
+            break
+    _INSURANCE_THRESHOLD_CACHE = result
+    _INSURANCE_THRESHOLD_COMPUTED = True
+    return result
 
 
 def get_insurance_threshold():
@@ -134,6 +163,11 @@ def get_filtered_indexes(rules):
       direction "+": TC >= threshold で action に切り替わる
       direction "-": TC <= threshold で action に切り替わる
     """
+    cache_key = _rules_key(rules)
+    cached = _FILTERED_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     filtered = []
     seen_hands = set()
     for (h, d, _ref_thr, _ref_act) in ILLUSTRIOUS_18 + FAB_4:
@@ -148,6 +182,8 @@ def get_filtered_indexes(rules):
         seen_hands.add(key)
         for (direction, thr, act) in _compute_deviations(h, d, rules):
             filtered.append((h, d, thr, act, direction))
+
+    _FILTERED_CACHE[cache_key] = filtered
     return filtered
 
 
