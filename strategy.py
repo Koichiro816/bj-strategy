@@ -388,9 +388,11 @@ def generate_ev_table(table: dict, rules: HouseRules, tc: float = 0) -> dict:
 # BSテーブル生成
 # ---------------------------------------------------------------------------
 
-def generate_strategy_table(rules: HouseRules) -> dict:
+def generate_strategy_table(rules: HouseRules, tc: float = 0) -> dict:
     """全ハンド×全アップカードのBSテーブルを生成する。
 
+    tc: True Count。0以外を指定すると、そのTCにおける最適戦略テーブルを
+        生成する（インデックスプレイの動的検証・適用に使用）。
     返り値:
       {
         'hard': {(total, upcard): action},   # total 5..17
@@ -409,7 +411,7 @@ def generate_strategy_table(rules: HouseRules) -> dict:
             act = best_action(total, soft=False, is_pair=False,
                               dealer_upcard=up, can_double=True,
                               can_split=False, can_surrender=can_surr,
-                              rules=rules)
+                              rules=rules, tc=tc)
             table["hard"][(total, up)] = act
 
     # ソフトハンド: A+2(13)..A+9(20)
@@ -418,7 +420,7 @@ def generate_strategy_table(rules: HouseRules) -> dict:
             act = best_action(total, soft=True, is_pair=False,
                               dealer_upcard=up, can_double=True,
                               can_split=False, can_surrender=False,
-                              rules=rules)
+                              rules=rules, tc=tc)
             table["soft"][(total, up)] = act
 
     # ペアハンド: 2..10, A(11)
@@ -436,10 +438,13 @@ def generate_strategy_table(rules: HouseRules) -> dict:
             act = best_action(total, soft=is_soft, is_pair=True,
                               dealer_upcard=up, can_double=(rank != 11),
                               can_split=can_split, can_surrender=can_surr_pair,
-                              rules=rules, pair_rank=rank)
+                              rules=rules, pair_rank=rank, tc=tc)
             table["pair"][(rank, up)] = act
 
     # 無限デッキ近似の誤差補正: 既知の偏差を 6D 標準 BS に揃える
+    # 無限デッキ近似自体の系統的な誤差（マージンが僅少なため自然計算では
+    # 不安定）を補正するものなので、TCに関わらず常に適用する
+    # （高TCでは自然な計算でも同じ結論になることを確認済み）
     if rules.soft17 == "S17":
         # Hard 11 vs A: 無限デッキ → H, 6D S17 HC → D
         # ENHC では BJ リスク(P=4/13)で D が著しく不利 → 補正は HC のみ
