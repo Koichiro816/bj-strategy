@@ -618,34 +618,38 @@ with tab3:
 
     scale = bankroll / DEFAULT_BANKROLL
 
-    bet_spread = None
+    # 自動スケール時は対応するwidgetのsession_stateを書き換えて表示値を強制更新する
+    # （number_inputは2回目以降のレンダリングでvalue引数を無視するため）
     if auto_scale:
-        min_bet = max(1, round(DEFAULT_MIN_BET * scale))
-        m1 = max(1, round(DEFAULT_BET_BY_TC[1] * scale))
-        m2 = max(1, round(DEFAULT_BET_BY_TC[2] * scale))
-        m3 = max(1, round(DEFAULT_BET_BY_TC[3] * scale))
-        st.caption(
-            f"自動スケール中（バンクロール比率 ×{scale:.3f}）: "
-            f"ミニマムベット {min_bet:,} / TC≥+1 {m1:,} / TC≥+2 {m2:,} / TC≥+3 {m3:,}")
-        if use_counting:
-            bet_spread = {1: m1, 2: m2, 3: m3}
-    else:
-        with col2:
-            min_bet = st.number_input("ミニマムベット（絶対額）", 1, 1_000_000,
-                                      DEFAULT_MIN_BET, step=1)
-        if use_counting:
-            st.markdown("**ベットスプレッド（TC 閾値 → 賭け額・絶対値）**")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                m1 = st.number_input("TC ≥ +1 賭け額（絶対額）", 1, 1_000_000,
-                                     DEFAULT_BET_BY_TC[1], step=1)
-            with c2:
-                m2 = st.number_input("TC ≥ +2 賭け額（絶対額）", 1, 1_000_000,
-                                     DEFAULT_BET_BY_TC[2], step=1)
-            with c3:
-                m3 = st.number_input("TC ≥ +3 賭け額（絶対額）", 1, 1_000_000,
-                                     DEFAULT_BET_BY_TC[3], step=1)
-            bet_spread = {1: m1, 2: m2, 3: m3}
+        st.session_state["sim_min_bet"] = max(1, round(DEFAULT_MIN_BET * scale))
+        st.session_state["sim_m1"] = max(1, round(DEFAULT_BET_BY_TC[1] * scale))
+        st.session_state["sim_m2"] = max(1, round(DEFAULT_BET_BY_TC[2] * scale))
+        st.session_state["sim_m3"] = max(1, round(DEFAULT_BET_BY_TC[3] * scale))
+
+    with col2:
+        min_bet = st.number_input("ミニマムベット（絶対額）", 1, 1_000_000,
+                                  DEFAULT_MIN_BET, step=1,
+                                  key="sim_min_bet", disabled=auto_scale)
+
+    bet_spread = None
+    if use_counting:
+        st.markdown("**ベットスプレッド（TC 閾値 → 賭け額・絶対値）**")
+        if auto_scale:
+            st.caption(f"バンクロール比率 ×{scale:.3f} で自動計算（編集不可）")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            m1 = st.number_input("TC ≥ +1 賭け額（絶対額）", 1, 1_000_000,
+                                 DEFAULT_BET_BY_TC[1], step=1,
+                                 key="sim_m1", disabled=auto_scale)
+        with c2:
+            m2 = st.number_input("TC ≥ +2 賭け額（絶対額）", 1, 1_000_000,
+                                 DEFAULT_BET_BY_TC[2], step=1,
+                                 key="sim_m2", disabled=auto_scale)
+        with c3:
+            m3 = st.number_input("TC ≥ +3 賭け額（絶対額）", 1, 1_000_000,
+                                 DEFAULT_BET_BY_TC[3], step=1,
+                                 key="sim_m3", disabled=auto_scale)
+        bet_spread = {1: m1, 2: m2, 3: m3}
 
     if st.button("シミュレーション実行", type="primary"):
         cfg = SimConfig(
@@ -690,13 +694,15 @@ with tab3:
                 xaxis_title="ハンド数", yaxis_title="累積純利益（絶対額）",
                 margin=dict(l=10, r=10, t=10, b=10), height=400,
                 xaxis=dict(rangeslider=dict(visible=True), type="linear"),
-                hovermode="x unified")
-            st.plotly_chart(fig, use_container_width=True)
+                hovermode="x unified", dragmode="pan")
+            st.plotly_chart(fig, use_container_width=True,
+                            config={"scrollZoom": True})
             st.caption(
                 f"全 {res.num_hands:,} 手のシミュレーション結果を、"
                 f"{sample_every:,} 手ごとに{len(res.bankroll_curve):,} 点サンプリングして"
                 "累積純利益の推移を表示しています（横軸＝経過ハンド数）。"
-                "グラフはドラッグでズーム、下部のスライダーで範囲選択、"
+                "グラフはドラッグでパン（移動）、マウスホイールでズーム、"
+                "下部のスライダーで範囲選択、"
                 "ダブルクリックで全体表示にリセットできます。")
 
         if use_counting:
