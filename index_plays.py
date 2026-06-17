@@ -47,6 +47,35 @@ def _normalize_upcard(up):
     return str(up)
 
 
+def get_filtered_indexes(rules):
+    """現在のハウスルールで実際に適用可能なインデックス一覧を返す（TC条件は問わない）。
+
+    UI（インデックスプレイタブの全一覧表示）とPDF出力の両方で共用し、
+    HC/ENHC・S17/H17・サレンダー設定などによって無効化されるインデックス
+    （例: ENHCでのdealer 10/A対面ダブル、サレンダー不可時のRインデックス）を
+    一覧から除外する。
+    """
+    filtered = []
+    for (h, d, thr, act) in ILLUSTRIOUS_18 + FAB_4:
+        if h == "Insurance":
+            filtered.append((h, d, thr, act))
+            continue
+        # H17限定プレイ（15 vs A）はS17では無効
+        if h == "15" and d == "A" and rules.soft17 == "S17":
+            continue
+        # サレンダー不可の場合、Rインデックスは無効
+        if act == "R" and rules.surrender == "none":
+            continue
+        # エース対面サレンダー不可の場合、対Aの Rインデックスは無効
+        if act == "R" and d == "A" and not rules.surrender_vs_ace:
+            continue
+        # ENHC: dealer 10/A は BJ リスクあり → D インデックスは無効
+        if not rules.dealer_peeks and act == "D" and _normalize_upcard(d) in ("10", "A"):
+            continue
+        filtered.append((h, d, thr, act))
+    return filtered
+
+
 def get_tc_adjusted_action(hand, dealer_upcard, true_count, base_action, rules):
     """TCに応じてBSアクションを調整する。
 
@@ -96,22 +125,8 @@ def get_active_indexes(true_count, rules):
 
     返り値: [(hand, upcard, threshold, action), ...]
     """
-    active = []
-    for (h, d, thr, act) in ILLUSTRIOUS_18 + FAB_4:
-        if h == "Insurance":
-            if true_count >= thr:
-                active.append((h, d, thr, act))
-            continue
-        if h == "15" and d == "A" and rules.soft17 == "S17":
-            continue
-        if act == "R" and rules.surrender == "none":
-            continue
-        # ENHC: dealer 10/A は BJ リスクあり → D インデックスは不適用
-        if not rules.dealer_peeks and act == "D" and _normalize_upcard(d) in ("10", "A"):
-            continue
-        if true_count >= thr:
-            active.append((h, d, thr, act))
-    return active
+    return [(h, d, thr, act) for (h, d, thr, act) in get_filtered_indexes(rules)
+            if true_count >= thr]
 
 
 def _up_to_int(d) -> int:

@@ -15,7 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from rules import HouseRules
 from strategy import generate_strategy_table, generate_ev_table
-from index_plays import ILLUSTRIOUS_18, FAB_4, apply_tc_overlay
+from index_plays import apply_tc_overlay, get_filtered_indexes
 
 
 # アクション→色のマッピング（カラー）
@@ -209,22 +209,14 @@ def _legend_flowable(styles, color, has_tc_changes: bool = False):
 
 
 def _index_table(rules: HouseRules):
-    """Illustrious 18 + Fab 4 のインデックス一覧テーブル（ルール適用済み）。"""
+    """Illustrious 18 + Fab 4 のインデックス一覧テーブル（ルール適用済み）。
+
+    フィルタリングは index_plays.get_filtered_indexes() を使用し、
+    アプリのインデックスプレイタブ（全一覧）と表示内容を一致させる。
+    """
     data = [["Hand", "Dealer", "Index(TC>=)", "Action"]]
-    for (h, d, thr, act) in ILLUSTRIOUS_18 + FAB_4:
-        # H17限定プレイ（15 vs A）はS17では非表示
-        if h == "15" and d == "A" and rules.soft17 == "S17":
-            continue
-        # サレンダー不可の場合、Rインデックスは非表示
-        if act == "R" and rules.surrender == "none":
-            continue
-        # エース対面サレンダー不可の場合は除外
-        if act == "R" and d == "A" and not rules.surrender_vs_ace:
-            continue
-        # ENHC: dealer 10/A 対面のダブルインデックスは非表示
+    for (h, d, thr, act) in get_filtered_indexes(rules):
         dlabel = "A" if d in ("A", 11) else str(d)
-        if not rules.dealer_peeks and act == "D" and dlabel in ("10", "A"):
-            continue
         data.append([str(h), dlabel, f"{thr:+d}", act])
 
     t = Table(data, colWidths=[60, 50, 70, 50], repeatRows=1)

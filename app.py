@@ -11,7 +11,7 @@ import streamlit as st
 from rules import HouseRules
 from strategy import generate_strategy_table, generate_ev_table
 from index_plays import (ILLUSTRIOUS_18, FAB_4, get_active_indexes,
-                         should_take_insurance, apply_tc_overlay)
+                         get_filtered_indexes, should_take_insurance, apply_tc_overlay)
 from simulator import SimConfig, simulate
 from pdf_export import generate_pdf
 
@@ -564,12 +564,18 @@ with tab2:
         st.write("発動中のインデックスはありません（BS通りにプレイ）。")
 
     st.markdown("---")
-    st.markdown("**Illustrious 18 + Fab 4 全一覧**")
+    st.markdown("**Illustrious 18 + Fab 4 全一覧（現在のハウスルールに適用可能なもののみ）**")
+    filtered_idx = get_filtered_indexes(rules)
     all_idx = pd.DataFrame(
         [(h, _up_label(d) if isinstance(d, int) else d, f"{thr:+d}", a)
-         for (h, d, thr, a) in ILLUSTRIOUS_18 + FAB_4],
+         for (h, d, thr, a) in filtered_idx],
         columns=["ハンド", "ディーラー", "発動TC", "アクション"])
     st.dataframe(all_idx, use_container_width=True, hide_index=True)
+    n_excluded = len(ILLUSTRIOUS_18) + len(FAB_4) - len(filtered_idx)
+    if n_excluded > 0:
+        st.caption(
+            f"※ 現在のルール（{rules.short_description()}）では適用不可のため "
+            f"{n_excluded} 件を除外しています。")
 
 # ---------------------------------------------------------------------------
 # Tab 3: シミュレーター
