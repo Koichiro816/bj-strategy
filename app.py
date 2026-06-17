@@ -341,6 +341,10 @@ _UPCD_BG = "background:linear-gradient(135deg,#283593,#1565C0)"
 _HAND_BG = "background:#EEF2FF"
 _EMPTY_BG = "#FAFAFA"
 _BORDER  = "border:1px solid #CFD8DC"
+# 左端のHand列をスマホ横スクロール時も固定表示するためのsticky指定
+# （Excelの「ウィンドウ枠の固定」と同様、左の見出し列だけ追従させる）
+_STICKY_COL = ("position:sticky;left:0;z-index:3;"
+              "box-shadow:2px 0 4px -2px rgba(0,0,0,0.25);")
 
 
 def _cell_style(act, is_changed):
@@ -365,7 +369,7 @@ def render_strategy_html(data_dict, row_keys, row_labels,
     # 行1: DEALER UPCARD スパン
     html.append(
         f'<tr>'
-        f'<th style="{_HDR_BG};color:transparent;padding:4px;'
+        f'<th style="{_HDR_BG};{_STICKY_COL}color:transparent;padding:4px;'
         f'{_BORDER};width:60px;"></th>'
         f'<th colspan="10" style="{_HDR_BG};color:#FFD700;padding:6px;'
         f'{_BORDER};font-size:0.76rem;font-weight:700;letter-spacing:0.14em;">'
@@ -375,7 +379,7 @@ def render_strategy_html(data_dict, row_keys, row_labels,
     # 行2: アップカード数字
     html.append('<tr>')
     html.append(
-        f'<th style="{_HAND_BG};color:#546E7A;padding:5px 4px;'
+        f'<th style="{_HAND_BG};{_STICKY_COL}color:#546E7A;padding:5px 4px;'
         f'{_BORDER};font-size:0.75rem;font-weight:600;">Hand</th>')
     for u in UPCARDS:
         html.append(
@@ -386,7 +390,7 @@ def render_strategy_html(data_dict, row_keys, row_labels,
     for key, label in zip(row_keys, row_labels):
         html.append('<tr>')
         html.append(
-            f'<td style="{_HAND_BG};color:#283593;font-weight:700;'
+            f'<td style="{_HAND_BG};{_STICKY_COL}color:#283593;font-weight:700;'
             f'padding:5px 6px;{_BORDER};white-space:nowrap;">{label}</td>')
         for u in UPCARDS:
             act = data_dict.get((key, u), "")
