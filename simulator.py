@@ -30,9 +30,9 @@ class SimConfig:
     rules: HouseRules
     num_hands: int = 1_000_000
     use_counting: bool = False
-    bet_spread: Optional[dict] = None   # {TC_threshold: multiplier} 例 {1:2,2:4,3:6}
-    min_bet: float = 1.0
-    bankroll: float = 100.0             # バンクロール（min_bet単位）
+    bet_spread: Optional[dict] = None   # {TC_threshold: 賭け額（絶対値）} 例 {1:2,2:4,3:6}
+    min_bet: float = 1.0                # ミニマムベット（絶対値）
+    bankroll: float = 100.0             # バンクロール（絶対値）
     strategy: str = "basic"             # "basic" or "counting"
     seed: Optional[int] = None
 
@@ -99,16 +99,16 @@ class Shoe:
 
 
 def _bet_size(tc: float, config: SimConfig) -> float:
-    """TCに応じたベット額（min_bet単位）を返す。"""
+    """TCに応じたベット額（絶対値）を返す。"""
     if not config.use_counting or not config.bet_spread:
         return config.min_bet
-    mult = 1.0
+    bet = config.min_bet
     # 閾値の高い順に評価して最大のものを採用
     for thr in sorted(config.bet_spread.keys()):
         if tc >= thr:
-            mult = config.bet_spread[thr]
+            bet = config.bet_spread[thr]
     # TCが閾値未満（負の局面）はミニマムベット
-    return config.min_bet * mult
+    return bet
 
 
 def _hand_total(cards):

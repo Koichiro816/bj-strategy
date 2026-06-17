@@ -591,6 +591,11 @@ with tab2:
 # ---------------------------------------------------------------------------
 with tab3:
     st.subheader("モンテカルロ シミュレーター")
+    # ベットサイジングの初期値（バンクロール自動スケールの基準比率として使用）
+    DEFAULT_BANKROLL = 100
+    DEFAULT_MIN_BET = 1
+    DEFAULT_BET_BY_TC = {1: 2, 2: 4, 3: 6}
+
     col1, col2 = st.columns(2)
     with col1:
         num_hands = st.select_slider(
@@ -599,20 +604,48 @@ with tab3:
             value=1_000_000)
         use_counting = st.checkbox("カウンティング戦略 (Hi-Lo)", value=False)
     with col2:
-        min_bet = st.number_input("ミニマムベット", 1, 1000, 1, step=1)
-        bankroll = st.number_input("バンクロール（min_bet 単位）", 10, 100000, 100, step=1)
+        bankroll = st.number_input("バンクロール（絶対額）", 1, 10_000_000,
+                                   DEFAULT_BANKROLL, step=1)
+
+    auto_scale = False
+    if use_counting:
+        auto_scale = st.checkbox(
+            "バンクロールに応じてTC毎の賭け額を自動スケール",
+            value=False,
+            help=f"チェック時、バンクロール初期値（{DEFAULT_BANKROLL:,}）とTC毎の賭け額"
+                 "初期値の比率を算出し、バンクロールを変更してもその比率を保ったまま"
+                 "ミニマムベット・TC閾値別の賭け額を自動調整します。")
+
+    scale = bankroll / DEFAULT_BANKROLL
 
     bet_spread = None
-    if use_counting:
-        st.markdown("**ベットスプレッド（TC 閾値 → 倍率）**")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            m1 = st.number_input("TC ≥ +1 倍率", 1, 50, 2, step=1)
-        with c2:
-            m2 = st.number_input("TC ≥ +2 倍率", 1, 50, 4, step=1)
-        with c3:
-            m3 = st.number_input("TC ≥ +3 倍率", 1, 50, 6, step=1)
-        bet_spread = {1: m1, 2: m2, 3: m3}
+    if auto_scale:
+        min_bet = max(1, round(DEFAULT_MIN_BET * scale))
+        m1 = max(1, round(DEFAULT_BET_BY_TC[1] * scale))
+        m2 = max(1, round(DEFAULT_BET_BY_TC[2] * scale))
+        m3 = max(1, round(DEFAULT_BET_BY_TC[3] * scale))
+        st.caption(
+            f"自動スケール中（バンクロール比率 ×{scale:.3f}）: "
+            f"ミニマムベット {min_bet:,} / TC≥+1 {m1:,} / TC≥+2 {m2:,} / TC≥+3 {m3:,}")
+        if use_counting:
+            bet_spread = {1: m1, 2: m2, 3: m3}
+    else:
+        with col2:
+            min_bet = st.number_input("ミニマムベット（絶対額）", 1, 1_000_000,
+                                      DEFAULT_MIN_BET, step=1)
+        if use_counting:
+            st.markdown("**ベットスプレッド（TC 閾値 → 賭け額・絶対値）**")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                m1 = st.number_input("TC ≥ +1 賭け額（絶対額）", 1, 1_000_000,
+                                     DEFAULT_BET_BY_TC[1], step=1)
+            with c2:
+                m2 = st.number_input("TC ≥ +2 賭け額（絶対額）", 1, 1_000_000,
+                                     DEFAULT_BET_BY_TC[2], step=1)
+            with c3:
+                m3 = st.number_input("TC ≥ +3 賭け額（絶対額）", 1, 1_000_000,
+                                     DEFAULT_BET_BY_TC[3], step=1)
+            bet_spread = {1: m1, 2: m2, 3: m3}
 
     if st.button("シミュレーション実行", type="primary"):
         cfg = SimConfig(
@@ -633,17 +666,17 @@ with tab3:
         m1c.metric("還元率", f"{res.return_pct:.2f}%")
         m2c.metric("ハウスエッジ", f"{res.house_edge:.3f}%")
         m3c.metric("勝率", f"{res.win_rate * 100:.1f}%")
-        m4c.metric("純利益（単位）", f"{res.net_profit:,.0f}")
+        m4c.metric("純利益（絶対額）", f"{res.net_profit:,.0f}")
 
         m5c, m6c, m7c, m8c = st.columns(4)
         m5c.metric("標準偏差", f"{res.std_dev:.3f}")
         m6c.metric("プロフィットファクター", f"{res.profit_factor:.3f}")
         m7c.metric("破産確率", f"{res.ruin_probability * 100:.1f}%")
-        m8c.metric("最大 DD（単位）", f"{res.max_drawdown:,.0f}")
+        m8c.metric("最大 DD（絶対額）", f"{res.max_drawdown:,.0f}")
 
         st.caption(
             f"P 値（純利益 > 0 の有意性・片側）: {res.p_value:.4f} / "
-            f"総賭け額: {res.total_wagered:,.0f} 単位")
+            f"総賭け額: {res.total_wagered:,.0f}")
 
         if res.bankroll_curve:
             sample_every = max(1, res.curve_sample_every)
@@ -652,9 +685,9 @@ with tab3:
             fig.add_trace(go.Scatter(
                 x=hand_index, y=res.bankroll_curve, mode="lines",
                 name="累積純利益", line=dict(color="#1f77b4"),
-                hovertemplate="ハンド数: %{x:,}<br>累積純利益: %{y:,.1f} 単位<extra></extra>"))
+                hovertemplate="ハンド数: %{x:,}<br>累積純利益: %{y:,.1f}<extra></extra>"))
             fig.update_layout(
-                xaxis_title="ハンド数", yaxis_title="累積純利益（min_bet単位）",
+                xaxis_title="ハンド数", yaxis_title="累積純利益（絶対額）",
                 margin=dict(l=10, r=10, t=10, b=10), height=400,
                 xaxis=dict(rangeslider=dict(visible=True), type="linear"),
                 hovermode="x unified")
@@ -669,7 +702,7 @@ with tab3:
         if use_counting:
             st.info(
                 "検証目安: カウンティング時の還元率 ≈ 102%（エッジ ≈ +2%）。"
-                " min×100 バンクロール + 標準スプレッドで破産確率 ≈ 75%。")
+                " ミニマムベット×100 のバンクロール + 標準スプレッドで破産確率 ≈ 75%。")
 
 # ---------------------------------------------------------------------------
 # Tab 4: PDF 出力
