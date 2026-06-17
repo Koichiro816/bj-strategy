@@ -45,8 +45,8 @@ FAB_4 = [
     ("16", 8, 4, "R"),
 ]
 
-# 動的閾値を探索するTCの範囲
-_TC_SCAN_RANGE = range(-10, 11)
+# 動的閾値を探索するTCの範囲（UIのTCスライダー実用範囲 -5..+5 に余裕を持たせた値）
+_TC_SCAN_RANGE = range(-6, 7)
 
 
 def _normalize_upcard(up):
@@ -74,17 +74,39 @@ def _hand_to_args(hand_str, dealer_upcard, rules):
                can_surrender=can_surrender, pair_rank=0)
 
 
-def _dynamic_threshold(hand_str, dealer_upcard, action, rules):
-    """指定アクションが実際に最適となる最小のTCを動的に計算する。
+def _compute_deviations(hand_str, dealer_upcard, rules):
+    """TC=0でのベーシックストラテジー（ベースアクション）から実際に
+    逸脱するTCの境界を動的に計算する。
 
-    現在のハウスルールの下でそのアクションが他の候補（特にサレンダーなど）
-    に常に劣る場合は None を返す（=このインデックスは適用不可）。
+    ベースアクションと同じアクションを「逸脱」として報告しないようにする
+    （例: 12 vs 6 はTC+0で既にスタンドが正解のため、TC>=-1でのスタンドを
+    「逸脱プレイ」として表示するのは誤り。実際の逸脱は低TCでヒットに
+    切り替わる方向のみ）。
+
+    返り値: [(direction, threshold, action), ...]（0〜2件）
+      direction "+": TC >= threshold で action に切り替わる（上昇方向の逸脱）
+      direction "-": TC <= threshold で action に切り替わる（下降方向の逸脱）
     """
     args = _hand_to_args(hand_str, dealer_upcard, rules)
-    for tc in _TC_SCAN_RANGE:
-        if best_action(rules=rules, tc=tc, **args) == action:
-            return tc
-    return None
+    base_action = best_action(rules=rules, tc=0, **args)
+
+    results = []
+
+    # 上昇方向: TCを上げていったとき最初にベースと異なるアクションになる点
+    for tc in range(1, _TC_SCAN_RANGE[-1] + 1):
+        a = best_action(rules=rules, tc=tc, **args)
+        if a != base_action:
+            results.append(("+", tc, a))
+            break
+
+    # 下降方向: TCを下げていったとき最初にベースと異なるアクションになる点
+    for tc in range(-1, _TC_SCAN_RANGE[0] - 1, -1):
+        a = best_action(rules=rules, tc=tc, **args)
+        if a != base_action:
+            results.append(("-", tc, a))
+            break
+
+    return results
 
 
 def _insurance_threshold():
@@ -95,28 +117,44 @@ def _insurance_threshold():
     return None
 
 
+def get_insurance_threshold():
+    """インシュランスが得になる最小のTC（UI表示用の公開関数）。"""
+    return _insurance_threshold()
+
+
 def get_filtered_indexes(rules):
-    """現在のハウスルールで実際に適用可能なインデックス一覧を、
-    動的に計算した正しい閾値とともに返す。
+    """現在のハウスルールで実際にベーシックストラテジーから逸脱する
+    インデックス一覧を、動的に計算した閾値・方向とともに返す。
 
     UI（インデックスプレイタブ）とPDF出力の両方で共用する。
-    H17限定プレイ（15 vs A）はS17では除外し、それ以外は
-    _dynamic_threshold() の結果（None=適用不可）でフィルタする。
+    ベースアクション（TC=0での最適解）と同じアクションは「逸脱」とみなさず
+    除外する。
+
+    返り値: [(hand, dealer, threshold, action, direction), ...]
+      direction "+": TC >= threshold で action に切り替わる
+      direction "-": TC <= threshold で action に切り替わる
     """
     filtered = []
-    for (h, d, _ref_thr, act) in ILLUSTRIOUS_18 + FAB_4:
+    seen_hands = set()
+    for (h, d, _ref_thr, _ref_act) in ILLUSTRIOUS_18 + FAB_4:
         if h == "Insurance":
             thr = _insurance_threshold()
             if thr is not None:
-                filtered.append((h, d, thr, act))
+                filtered.append((h, d, thr, "Buy", "+"))
             continue
-        if h == "15" and d == "A" and rules.soft17 == "S17":
+        key = (h, d)
+        if key in seen_hands:
             continue
-        thr = _dynamic_threshold(h, d, act, rules)
-        if thr is None:
-            continue
-        filtered.append((h, d, thr, act))
+        seen_hands.add(key)
+        for (direction, thr, act) in _compute_deviations(h, d, rules):
+            filtered.append((h, d, thr, act, direction))
     return filtered
+
+
+def _is_triggered(true_count, threshold, direction) -> bool:
+    if direction == "+":
+        return true_count >= threshold
+    return true_count <= threshold
 
 
 def get_tc_adjusted_action(hand, dealer_upcard, true_count, base_action, rules):
@@ -135,12 +173,13 @@ def get_tc_adjusted_action(hand, dealer_upcard, true_count, base_action, rules):
     up = _normalize_upcard(dealer_upcard)
     hand_str = str(hand)
 
-    for (h, d, thr, act) in get_filtered_indexes(rules):
+    for (h, d, thr, act, direction) in get_filtered_indexes(rules):
         if h == "Insurance":
             continue
         if str(h) == hand_str and _normalize_upcard(d) == up:
-            if true_count >= thr:
-                desc = f"TC>={thr:+d} のため {base_action}→{act}（Illustrious18/Fab4）"
+            if _is_triggered(true_count, thr, direction):
+                op = ">=" if direction == "+" else "<="
+                desc = f"TC{op}{thr:+d} のため {base_action}→{act}（インデックスプレイ）"
                 return act, True, desc
 
     return base_action, False, "インデックス該当なし（BS通り）"
@@ -155,10 +194,11 @@ def should_take_insurance(true_count) -> bool:
 def get_active_indexes(true_count, rules):
     """現在のTCで発動しているインデックス一覧を返す（UI表示用）。
 
-    返り値: [(hand, upcard, threshold, action), ...]
+    返り値: [(hand, upcard, threshold, action, direction), ...]
     """
-    return [(h, d, thr, act) for (h, d, thr, act) in get_filtered_indexes(rules)
-            if true_count >= thr]
+    return [(h, d, thr, act, direction)
+            for (h, d, thr, act, direction) in get_filtered_indexes(rules)
+            if _is_triggered(true_count, thr, direction)]
 
 
 def apply_tc_overlay(base_table: dict, tc, rules) -> tuple:

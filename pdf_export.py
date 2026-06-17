@@ -214,10 +214,11 @@ def _index_table(rules: HouseRules):
     フィルタリングは index_plays.get_filtered_indexes() を使用し、
     アプリのインデックスプレイタブ（全一覧）と表示内容を一致させる。
     """
-    data = [["Hand", "Dealer", "Index(TC>=)", "Action"]]
-    for (h, d, thr, act) in get_filtered_indexes(rules):
+    data = [["Hand", "Dealer", "Index", "Action"]]
+    for (h, d, thr, act, direction) in get_filtered_indexes(rules):
         dlabel = "A" if d in ("A", 11) else str(d)
-        data.append([str(h), dlabel, f"{thr:+d}", act])
+        op = ">=" if direction == "+" else "<="
+        data.append([str(h), dlabel, f"TC{op}{thr:+d}", act])
 
     t = Table(data, colWidths=[60, 50, 70, 50], repeatRows=1)
     t.setStyle(TableStyle([

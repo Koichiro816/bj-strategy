@@ -11,7 +11,8 @@ import streamlit as st
 from rules import HouseRules
 from strategy import generate_strategy_table, generate_ev_table
 from index_plays import (ILLUSTRIOUS_18, FAB_4, get_active_indexes,
-                         get_filtered_indexes, should_take_insurance, apply_tc_overlay)
+                         get_filtered_indexes, should_take_insurance,
+                         get_insurance_threshold, apply_tc_overlay)
 from simulator import SimConfig, simulate
 from pdf_export import generate_pdf
 
@@ -543,38 +544,45 @@ with tab1:
 # ---------------------------------------------------------------------------
 # Tab 2: インデックスプレイ
 # ---------------------------------------------------------------------------
+def _thr_label(thr, direction):
+    op = "≥" if direction == "+" else "≤"
+    return f"TC{op}{thr:+d}"
+
+
 with tab2:
     st.subheader("True Count 別インデックスプレイ（Hi-Lo）")
     tc2 = st.slider("True Count (TC)", -5, 5, 0, 1)
 
+    ins_thr = get_insurance_threshold()
     if should_take_insurance(tc2):
-        st.success(f"TC {tc2:+d} → インシュランスを取る（TC ≥ +3）")
+        st.success(f"TC {tc2:+d} → インシュランスを取る（TC ≥ {ins_thr:+d}）")
     else:
-        st.info(f"TC {tc2:+d} → インシュランスは取らない")
+        st.info(f"TC {tc2:+d} → インシュランスは取らない（TC ≥ {ins_thr:+d} で得）")
 
     active = get_active_indexes(tc2, rules)
-    st.markdown(f"**TC {tc2:+d} で発動中のインデックス**")
+    st.markdown(f"**TC {tc2:+d} でベーシックストラテジーから逸脱中のプレイ**")
     if active:
         df = pd.DataFrame(
-            [(h, _up_label(d) if isinstance(d, int) else d, f"{thr:+d}", a)
-             for (h, d, thr, a) in active],
-            columns=["ハンド", "ディーラー", "発動TC", "アクション"])
+            [(h, _up_label(d) if isinstance(d, int) else d, _thr_label(thr, direction), a)
+             for (h, d, thr, a, direction) in active],
+            columns=["ハンド", "ディーラー", "発動条件", "アクション"])
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
-        st.write("発動中のインデックスはありません（BS通りにプレイ）。")
+        st.write("発動中の逸脱プレイはありません（BS通りにプレイ）。")
 
     st.markdown("---")
-    st.markdown("**Illustrious 18 + Fab 4 全一覧（現在のハウスルールに適用可能なもののみ）**")
+    st.markdown("**インデックスプレイ全一覧（現在のハウスルールで実際にBSから逸脱するものだけを動的に算出）**")
     filtered_idx = get_filtered_indexes(rules)
     all_idx = pd.DataFrame(
-        [(h, _up_label(d) if isinstance(d, int) else d, f"{thr:+d}", a)
-         for (h, d, thr, a) in filtered_idx],
-        columns=["ハンド", "ディーラー", "発動TC", "アクション"])
+        [(h, _up_label(d) if isinstance(d, int) else d, _thr_label(thr, direction), a)
+         for (h, d, thr, a, direction) in filtered_idx],
+        columns=["ハンド", "ディーラー", "発動条件", "アクション"])
     st.dataframe(all_idx, use_container_width=True, hide_index=True)
     n_excluded = len(ILLUSTRIOUS_18) + len(FAB_4) - len(filtered_idx)
     if n_excluded > 0:
         st.caption(
-            f"※ 現在のルール（{rules.short_description()}）では適用不可のため "
+            f"※ 現在のルール（{rules.short_description()}）ではBSから逸脱しない、"
+            f"または他のアクションが常に優先されるため "
             f"{n_excluded} 件を除外しています。")
 
 # ---------------------------------------------------------------------------
