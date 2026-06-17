@@ -247,16 +247,23 @@ def generate_pdf(
     title_style = ParagraphStyle("title", parent=styles["Title"], fontSize=14)
     h_style = ParagraphStyle("h", parent=styles["Heading2"], fontSize=10)
     note_style = ParagraphStyle("note", parent=styles["Normal"], fontSize=7)
+    tc_style = ParagraphStyle(
+        "tc", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#1565C0"))
 
     elements = []
     page1 = []  # ベーシックストラテジー表+凡例: 1ページに収めるためKeepTogetherでまとめる
     page1.append(Paragraph("Blackjack Basic Strategy", title_style))
     page1.append(Paragraph(rules.short_description(), note_style))
-    if true_count != 0:
-        tc_note = f"TC = {true_count:+d} index plays applied"
+
+    # True Count は常に明記する（TC=0でもベース戦略であることを示す）
+    if true_count == 0:
+        tc_line = "True Count (TC): +0 &nbsp;(Base Strategy — no index plays)"
+    else:
+        tc_line = f"True Count (TC): {true_count:+d}"
         if changed:
-            tc_note += f" ({len(changed)} cells adjusted, shown in orange)"
-        page1.append(Paragraph(tc_note, note_style))
+            tc_line += f" &nbsp;—&nbsp; {len(changed)} cell(s) adjusted by index plays (shown in orange)"
+    page1.append(Paragraph(tc_line, tc_style))
     page1.append(Spacer(1, 4 * mm))
 
     # 3テーブルを横並びにするため、それぞれTableを作りまとめる
