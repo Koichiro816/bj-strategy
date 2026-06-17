@@ -22,6 +22,31 @@ def card_prob(rank: int) -> float:
     return 4.0 / 13.0 if rank == 10 else 1.0 / 13.0
 
 
+def card_prob_tc(rank: int, tc: float) -> float:
+    """True Count(TC)を考慮したカード出現確率の近似値。
+
+    Hi-Loはバランスドカウントシステムで、1デッキ中の構成は
+    低タグ(2-6)20枚・中タグ(7-9)12枚・高タグ(10,A)20枚。
+    このバランス特性により、各タグ群の残り比率は残りデッキ数に依存せず
+    TCのみから決まる:
+      低タグ比率 = (20 - TC/2) / 52
+      高タグ比率 = (20 + TC/2) / 52
+      中タグ比率 = 12/52（不変）
+    TC=0 のとき card_prob() と完全に一致する。
+    """
+    if rank in (2, 3, 4, 5, 6):
+        group = (20.0 - tc / 2.0) / 52.0
+        return group / 5.0
+    if rank in (7, 8, 9):
+        return 1.0 / 13.0
+    if rank == 10:
+        group = (20.0 + tc / 2.0) / 52.0
+        return group * (4.0 / 5.0)
+    # rank == 11 (A)
+    group = (20.0 + tc / 2.0) / 52.0
+    return group * (1.0 / 5.0)
+
+
 def hand_value(total: int, soft: bool):
     """ソフト/ハードを考慮した実効合計を返す。
     ソフトかつ合計が21を超える場合はエースを1として扱う（ハード化）。
@@ -59,9 +84,10 @@ def add_card(total: int, soft: bool, rank: int):
 # ---------------------------------------------------------------------------
 
 @lru_cache(maxsize=None)
-def _dealer_recurse(total: int, soft: bool, h17: bool) -> tuple:
+def _dealer_recurse(total: int, soft: bool, h17: bool, tc: float = 0) -> tuple:
     """ディーラーの手札(total, soft)から最終分布を再帰計算する。
 
+    tc: True Count。0なら無限デッキ中立、それ以外は card_prob_tc で残りデッキ構成を近似。
     返り値はタプル化された分布（lru_cache対応のため）:
       (p17, p18, p19, p20, p21, p_bust)
     """
@@ -89,20 +115,21 @@ def _dealer_recurse(total: int, soft: bool, h17: bool) -> tuple:
     # ヒット：各カードについて再帰
     agg = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     for rank in CARD_RANKS:
-        p = card_prob(rank)
+        p = card_prob_tc(rank, tc)
         nt, ns = add_card(total, soft, rank)
-        sub = _dealer_recurse(nt, ns, h17)
+        sub = _dealer_recurse(nt, ns, h17, tc)
         for i in range(6):
             agg[i] += p * sub[i]
     return tuple(agg)
 
 
 @lru_cache(maxsize=None)
-def _dealer_from_upcard(upcard: int, h17: bool, peek: bool) -> tuple:
+def _dealer_from_upcard(upcard: int, h17: bool, peek: bool, tc: float = 0) -> tuple:
     """アップカードからディーラー最終分布を計算する。
 
     peek=True（US式）の場合、ディーラーBJが既に否定された条件付き分布を返す。
     （プレイヤーが行動するのはディーラーBJでない場合のみのため）
+    tc: True Count。残りデッキ構成の近似に使用。
     """
     # 1枚目（アップカード）に2枚目を加えて展開
     agg = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -114,14 +141,14 @@ def _dealer_from_upcard(upcard: int, h17: bool, peek: bool) -> tuple:
                 continue  # A + 10 = BJ → 除外
             if upcard == 10 and rank == 11:
                 continue  # 10 + A = BJ → 除外
-        p = card_prob(rank)
+        p = card_prob_tc(rank, tc)
         # upcard自体のソフト判定（A=11はソフト扱い）
         if upcard == 11:
             base_total, base_soft = 11, True
         else:
             base_total, base_soft = upcard, False
         nt, ns = add_card(base_total, base_soft, rank)
-        sub = _dealer_recurse(nt, ns, h17)
+        sub = _dealer_recurse(nt, ns, h17, tc)
         for i in range(6):
             agg[i] += p * sub[i]
         total_p += p
@@ -132,14 +159,14 @@ def _dealer_from_upcard(upcard: int, h17: bool, peek: bool) -> tuple:
     return tuple(agg)
 
 
-def dealer_final_probs(upcard: int, rules: HouseRules) -> dict:
+def dealer_final_probs(upcard: int, rules: HouseRules, tc: float = 0) -> dict:
     """ディーラー最終手確率を辞書で返す。
 
     返り値: {17: p, 18: p, 19: p, 20: p, 21: p, 'bust': p}
     upcard: 2..10, 11(=A)
     """
     h17 = rules.soft17 == "H17"
-    probs = _dealer_from_upcard(upcard, h17, rules.dealer_peeks)
+    probs = _dealer_from_upcard(upcard, h17, rules.dealer_peeks, tc)
     return {
         17: probs[0],
         18: probs[1],
@@ -173,13 +200,13 @@ def ev_stand(player_total: int, dealer_probs: dict) -> float:
 
 @lru_cache(maxsize=None)
 def _ev_hit_cached(player_total: int, soft: bool, dealer_upcard: int,
-                   h17: bool, peek: bool) -> float:
+                   h17: bool, peek: bool, tc: float = 0) -> float:
     """ヒット時EVの再帰計算（メモ化）。最善のスタンド/ヒットを選ぶ。"""
     if player_total > 21:
         return -1.0
 
     # ディーラー分布（条件は固定なのでrules相当のフラグで取得）
-    dprobs = _dealer_from_upcard(dealer_upcard, h17, peek)
+    dprobs = _dealer_from_upcard(dealer_upcard, h17, peek, tc)
     dealer_probs = {
         17: dprobs[0], 18: dprobs[1], 19: dprobs[2],
         20: dprobs[3], 21: dprobs[4], "bust": dprobs[5],
@@ -187,37 +214,37 @@ def _ev_hit_cached(player_total: int, soft: bool, dealer_upcard: int,
 
     ev = 0.0
     for rank in CARD_RANKS:
-        p = card_prob(rank)
+        p = card_prob_tc(rank, tc)
         nt, ns = add_card(player_total, soft, rank)
         if nt > 21:
             ev += p * (-1.0)
         else:
             # 次の一手は スタンド or さらにヒット の良い方
             stand_ev = ev_stand(nt, dealer_probs)
-            hit_ev = _ev_hit_cached(nt, ns, dealer_upcard, h17, peek)
+            hit_ev = _ev_hit_cached(nt, ns, dealer_upcard, h17, peek, tc)
             ev += p * max(stand_ev, hit_ev)
     return ev
 
 
 def ev_hit(player_total: int, soft: bool, dealer_upcard: int,
-           rules: HouseRules) -> float:
-    """ヒット時EV（以降は最適プレイ）。"""
+           rules: HouseRules, tc: float = 0) -> float:
+    """ヒット時EV（以降は最適プレイ）。tc: True Count（残りデッキ構成の近似に使用）。"""
     h17 = rules.soft17 == "H17"
-    return _ev_hit_cached(player_total, soft, dealer_upcard, h17, rules.dealer_peeks)
+    return _ev_hit_cached(player_total, soft, dealer_upcard, h17, rules.dealer_peeks, tc)
 
 
 def ev_double(player_total: int, soft: bool, dealer_upcard: int,
-              rules: HouseRules) -> float:
+              rules: HouseRules, tc: float = 0) -> float:
     """ダブル時EV。1枚だけ引いてスタンド、賭け金2倍。"""
     h17 = rules.soft17 == "H17"
-    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks)
+    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks, tc)
     dealer_probs = {
         17: dprobs[0], 18: dprobs[1], 19: dprobs[2],
         20: dprobs[3], 21: dprobs[4], "bust": dprobs[5],
     }
     ev = 0.0
     for rank in CARD_RANKS:
-        p = card_prob(rank)
+        p = card_prob_tc(rank, tc)
         nt, ns = add_card(player_total, soft, rank)
         if nt > 21:
             ev += p * (-2.0)
@@ -226,13 +253,13 @@ def ev_double(player_total: int, soft: bool, dealer_upcard: int,
     return ev
 
 
-def ev_split(pair_rank: int, dealer_upcard: int, rules: HouseRules) -> float:
+def ev_split(pair_rank: int, dealer_upcard: int, rules: HouseRules, tc: float = 0) -> float:
     """スプリット時EV（近似）。
     各ハンドを「pair_rank 1枚スタート」とみなし、独立2ハンド分のEVを合算する近似。
     エースは1枚引いてスタンド（draw_to_split_aces=Falseのとき）。
     """
     h17 = rules.soft17 == "H17"
-    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks)
+    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks, tc)
     dealer_probs = {
         17: dprobs[0], 18: dprobs[1], 19: dprobs[2],
         20: dprobs[3], 21: dprobs[4], "bust": dprobs[5],
@@ -246,22 +273,22 @@ def ev_split(pair_rank: int, dealer_upcard: int, rules: HouseRules) -> float:
         # エースは1枚のみ
         single = 0.0
         for rank in CARD_RANKS:
-            p = card_prob(rank)
+            p = card_prob_tc(rank, tc)
             nt, ns = add_card(base_total, base_soft, rank)
             single += p * ev_stand(nt, dealer_probs)
     else:
         single = 0.0
         for rank in CARD_RANKS:
-            p = card_prob(rank)
+            p = card_prob_tc(rank, tc)
             nt, ns = add_card(base_total, base_soft, rank)
             if nt > 21:
                 single += p * (-1.0)
             else:
                 stand_ev = ev_stand(nt, dealer_probs)
-                hit_ev = ev_hit(nt, ns, dealer_upcard, rules)
+                hit_ev = ev_hit(nt, ns, dealer_upcard, rules, tc)
                 # DAS考慮（簡易：ダブルも候補に）
                 if rules.double_after_split and rules.can_double_total(nt) and not ns:
-                    d_ev = ev_double(nt, ns, dealer_upcard, rules)
+                    d_ev = ev_double(nt, ns, dealer_upcard, rules, tc)
                     single += p * max(stand_ev, hit_ev, d_ev)
                 else:
                     single += p * max(stand_ev, hit_ev)
@@ -281,13 +308,13 @@ def ev_surrender() -> float:
 def best_action(player_total: int, soft: bool, is_pair: bool,
                 dealer_upcard: int, can_double: bool, can_split: bool,
                 can_surrender: bool, rules: HouseRules,
-                pair_rank: int = 0) -> str:
+                pair_rank: int = 0, tc: float = 0) -> str:
     """最適アクションを返す。
 
     返り値: "H"=ヒット, "S"=スタンド, "D"=ダブル, "P"=スプリット, "R"=サレンダー
     """
     h17 = rules.soft17 == "H17"
-    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks)
+    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks, tc)
     dealer_probs = {
         17: dprobs[0], 18: dprobs[1], 19: dprobs[2],
         20: dprobs[3], 21: dprobs[4], "bust": dprobs[5],
@@ -295,17 +322,17 @@ def best_action(player_total: int, soft: bool, is_pair: bool,
 
     candidates = {}
     candidates["S"] = ev_stand(player_total, dealer_probs)
-    candidates["H"] = ev_hit(player_total, soft, dealer_upcard, rules)
+    candidates["H"] = ev_hit(player_total, soft, dealer_upcard, rules, tc)
 
     if can_double and rules.can_double_total(player_total if not soft else player_total):
-        candidates["D"] = ev_double(player_total, soft, dealer_upcard, rules)
+        candidates["D"] = ev_double(player_total, soft, dealer_upcard, rules, tc)
 
     if can_surrender and rules.surrender != "none":
         if dealer_upcard != 11 or rules.surrender_vs_ace:
             candidates["R"] = ev_surrender()
 
     if is_pair and can_split:
-        candidates["P"] = ev_split(pair_rank, dealer_upcard, rules)
+        candidates["P"] = ev_split(pair_rank, dealer_upcard, rules, tc)
 
     # 最大EVのアクションを選択
     best = max(candidates, key=candidates.get)
@@ -313,19 +340,22 @@ def best_action(player_total: int, soft: bool, is_pair: bool,
 
 
 def _action_ev(action: str, player_total: int, soft: bool, dealer_upcard: int,
-              rules: HouseRules, pair_rank: int = 0) -> float:
-    """指定アクションを実行した場合のEVを計算する（表示用）。"""
+              rules: HouseRules, pair_rank: int = 0, tc: float = 0) -> float:
+    """指定アクションを実行した場合のEVを計算する（表示用）。
+
+    tc: True Count。0以外の場合 card_prob_tc による残りデッキ構成近似を反映する。
+    """
     if action == "R":
         return ev_surrender()
     if action == "D":
-        return ev_double(player_total, soft, dealer_upcard, rules)
+        return ev_double(player_total, soft, dealer_upcard, rules, tc)
     if action == "P":
-        return ev_split(pair_rank, dealer_upcard, rules)
+        return ev_split(pair_rank, dealer_upcard, rules, tc)
     if action == "H":
-        return ev_hit(player_total, soft, dealer_upcard, rules)
+        return ev_hit(player_total, soft, dealer_upcard, rules, tc)
     # "S"（スタンド）がデフォルト
     h17 = rules.soft17 == "H17"
-    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks)
+    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks, tc)
     dealer_probs = {
         17: dprobs[0], 18: dprobs[1], 19: dprobs[2],
         20: dprobs[3], 21: dprobs[4], "bust": dprobs[5],
@@ -333,23 +363,24 @@ def _action_ev(action: str, player_total: int, soft: bool, dealer_upcard: int,
     return ev_stand(player_total, dealer_probs)
 
 
-def generate_ev_table(table: dict, rules: HouseRules) -> dict:
+def generate_ev_table(table: dict, rules: HouseRules, tc: float = 0) -> dict:
     """戦略テーブルの各セルについて、表示中アクションのEVを計算した辞書を返す。
 
     table: generate_strategy_table() の出力、または TC overlay 適用後のテーブル。
            表示中のアクションに対するEVを返すため、overlay適用後でも対応可能。
+    tc   : True Count。指定するとHi-Lo比率調整によるTC反映後のEVを返す。
     返り値: table と同じキー構造（'hard'/'soft'/'pair'）でEV(float)を保持。
     """
     ev_table = {"hard": {}, "soft": {}, "pair": {}}
     for (total, up), act in table["hard"].items():
-        ev_table["hard"][(total, up)] = _action_ev(act, total, False, up, rules)
+        ev_table["hard"][(total, up)] = _action_ev(act, total, False, up, rules, tc=tc)
     for (total, up), act in table["soft"].items():
-        ev_table["soft"][(total, up)] = _action_ev(act, total, True, up, rules)
+        ev_table["soft"][(total, up)] = _action_ev(act, total, True, up, rules, tc=tc)
     for (rank, up), act in table["pair"].items():
         total = rank * 2 if rank != 11 else 12
         is_soft = rank == 11
         ev_table["pair"][(rank, up)] = _action_ev(
-            act, total, is_soft, up, rules, pair_rank=rank)
+            act, total, is_soft, up, rules, pair_rank=rank, tc=tc)
     return ev_table
 
 

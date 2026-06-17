@@ -483,7 +483,7 @@ with tab1:
     else:
         display_table, changed_cells = apply_tc_overlay(strategy_table, tab1_tc, rules)
 
-    ev_table = generate_ev_table(display_table, rules) if show_ev else None
+    ev_table = generate_ev_table(display_table, rules, tc=tab1_tc) if show_ev else None
 
     if should_take_insurance(tab1_tc):
         st.success(f"TC {tab1_tc:+d} → インシュランスを取る（TC ≥ +3）")
@@ -532,8 +532,9 @@ with tab1:
         " ENHC/ANHC 選択時はノーホールカードルールが自動反映されます。")
     if show_ev:
         st.caption(
-            "EVは賭け金1単位あたりの期待値（無限デッキ近似・TC=0中立カウント前提）。"
-            " TCインデックス発動セルは変更後アクションのEVを表示します。")
+            "EVは賭け金1単位あたりの期待値。Hi-Loのバランス特性を利用し、"
+            "選択したTCに応じて残りデッキの構成比率を近似調整して計算しています"
+            "（TCを変えるとEV値も変化します）。TCインデックス発動セルは変更後アクションのEVを表示します。")
 
 # ---------------------------------------------------------------------------
 # Tab 2: インデックスプレイ
