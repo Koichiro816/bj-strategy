@@ -598,8 +598,8 @@ with tab3:
             value=1_000_000)
         use_counting = st.checkbox("カウンティング戦略 (Hi-Lo)", value=False)
     with col2:
-        min_bet = st.number_input("ミニマムベット", 1.0, 1000.0, 1.0)
-        bankroll = st.number_input("バンクロール（min_bet 単位）", 10.0, 100000.0, 100.0)
+        min_bet = st.number_input("ミニマムベット", 1, 1000, 1, step=1)
+        bankroll = st.number_input("バンクロール（min_bet 単位）", 10, 100000, 100, step=1)
 
     bet_spread = None
     if use_counting:
@@ -645,7 +645,16 @@ with tab3:
             f"総賭け額: {res.total_wagered:,.0f} 単位")
 
         if res.bankroll_curve:
-            st.line_chart(pd.DataFrame({"累積純利益": res.bankroll_curve}))
+            sample_every = max(1, res.curve_sample_every)
+            hand_index = [i * sample_every for i in range(len(res.bankroll_curve))]
+            curve_df = pd.DataFrame(
+                {"累積純利益（min_bet単位）": res.bankroll_curve},
+                index=pd.Index(hand_index, name="ハンド数"))
+            st.line_chart(curve_df)
+            st.caption(
+                f"全 {res.num_hands:,} 手のシミュレーション結果を、"
+                f"{sample_every:,} 手ごとに{len(res.bankroll_curve):,} 点サンプリングして"
+                "累積純利益の推移を表示しています（横軸＝経過ハンド数）。")
 
         if use_counting:
             st.info(

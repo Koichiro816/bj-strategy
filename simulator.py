@@ -52,6 +52,7 @@ class SimResult:
     total_wagered: float = 0.0
     return_pct: float = 0.0    # 還元率(%)
     bankroll_curve: list = field(default_factory=list)
+    curve_sample_every: int = 1  # bankroll_curveの各点が何ハンドおきのサンプルか
 
 
 class Shoe:
@@ -472,6 +473,7 @@ def simulate(config: SimConfig) -> SimResult:
         total_wagered=total_wagered,
         return_pct=return_pct,
         bankroll_curve=curve_sample,
+        curve_sample_every=sample_every,
     )
 
 
