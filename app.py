@@ -601,7 +601,18 @@ with tab3:
         use_counting = st.checkbox("カウンティング戦略 (Hi-Lo)", value=False)
     with col2:
         bankroll = st.number_input("バンクロール（絶対額）", 1, 10_000_000, 100, step=1)
-        min_bet = st.number_input("ミニマムベット（絶対額）", 1, 1_000_000, 1, step=1)
+        max_bet = st.number_input("マックスベット（絶対額）", 1, 1_000_000, 1000, step=1,
+                                  key="sim_max_bet")
+
+        # 既存セッションでmin_bet/TC毎の賭け額がmax_betより大きい場合、
+        # widget生成前にクリップしておく（number_inputは現在値が
+        # max_valueを超えていると例外になるため）。
+        for _key in ("sim_min_bet", "sim_m1", "sim_m2", "sim_m3"):
+            if _key in st.session_state and st.session_state[_key] > max_bet:
+                st.session_state[_key] = max_bet
+
+        min_bet = st.number_input("ミニマムベット（絶対額）", 1, int(max_bet), 1, step=1,
+                                  key="sim_min_bet")
 
     auto_scale = False
     if use_counting:
@@ -616,14 +627,19 @@ with tab3:
 
     bet_spread = None
     if use_counting:
-        st.markdown("**ベットスプレッド（TC 閾値 → 賭け額・絶対値、開始時バンクロール基準）**")
+        st.markdown(
+            "**ベットスプレッド（TC 閾値 → 賭け額・絶対値、開始時バンクロール基準、"
+            f"マックスベット {int(max_bet):,} まで）**")
         c1, c2, c3 = st.columns(3)
         with c1:
-            m1 = st.number_input("TC ≥ +1 賭け額（絶対額）", 1, 1_000_000, 2, step=1)
+            m1 = st.number_input("TC ≥ +1 賭け額（絶対額）", 1, int(max_bet),
+                                 min(2, int(max_bet)), step=1, key="sim_m1")
         with c2:
-            m2 = st.number_input("TC ≥ +2 賭け額（絶対額）", 1, 1_000_000, 4, step=1)
+            m2 = st.number_input("TC ≥ +2 賭け額（絶対額）", 1, int(max_bet),
+                                 min(4, int(max_bet)), step=1, key="sim_m2")
         with c3:
-            m3 = st.number_input("TC ≥ +3 賭け額（絶対額）", 1, 1_000_000, 6, step=1)
+            m3 = st.number_input("TC ≥ +3 賭け額（絶対額）", 1, int(max_bet),
+                                 min(6, int(max_bet)), step=1, key="sim_m3")
         bet_spread = {1: m1, 2: m2, 3: m3}
 
     if st.button("シミュレーション実行", type="primary"):
@@ -633,6 +649,7 @@ with tab3:
             use_counting=use_counting,
             bet_spread=bet_spread,
             min_bet=min_bet,
+            max_bet=max_bet,
             bankroll=bankroll,
             bankroll_scaling=auto_scale,
             strategy="counting" if use_counting else "basic",

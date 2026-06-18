@@ -32,6 +32,7 @@ class SimConfig:
     use_counting: bool = False
     bet_spread: Optional[dict] = None   # {TC_threshold: 賭け額（絶対値、開始時バンクロール基準）} 例 {1:2,2:4,3:6}
     min_bet: float = 1.0                # ミニマムベット（絶対値、開始時バンクロール基準）
+    max_bet: float = 1_000_000.0        # マックスベット（絶対値）。賭け額はこれを超えない
     bankroll: float = 100.0             # バンクロール（絶対値、シミュレーション開始時の値）
     bankroll_scaling: bool = False      # True: 各ハンドの賭け額を「現在のバンクロール/開始時バンクロール」の比率で動的にスケールする
     strategy: str = "basic"             # "basic" or "counting"
@@ -108,14 +109,15 @@ def _tier_bet(tc: float, config: SimConfig) -> float:
     に依存しない安定した基準値として使う。
     """
     if not config.use_counting or not config.bet_spread:
-        return config.min_bet
+        return min(config.max_bet, config.min_bet)
     bet = config.min_bet
     # 閾値の高い順に評価して最大のものを採用
     for thr in sorted(config.bet_spread.keys()):
         if tc >= thr:
             bet = config.bet_spread[thr]
     # TCが閾値未満（負の局面）はミニマムベット
-    return bet
+    # マックスベットを超えないようにクリップ
+    return min(config.max_bet, bet)
 
 
 def _bet_size(tc: float, config: SimConfig, current_bankroll: float) -> float:
@@ -132,8 +134,10 @@ def _bet_size(tc: float, config: SimConfig, current_bankroll: float) -> float:
 
     # テーブルの実質的な最低ベット(config.min_bet)を下回らないようにする
     # （スケール後の値をハードコードの1で下限にすると、min_bet>1設定時に
-    # 設定した最低ベットより小さい賭け額になってしまう）
-    return max(config.min_bet, bet)
+    # 設定した最低ベットより小さい賭け額になってしまう）。
+    # 同様に、自動スケールでバンクロールが増えてもマックスベットを超えない
+    # ようにクリップする。
+    return min(config.max_bet, max(config.min_bet, bet))
 
 
 def _hand_total(cards):
