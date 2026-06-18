@@ -653,6 +653,11 @@ with tab3:
         m6c.metric("プロフィットファクター", f"{res.profit_factor:.3f}")
         m7c.metric("破産確率", f"{res.ruin_probability * 100:.1f}%")
         m8c.metric("最大 DD（絶対額）", f"{res.max_drawdown:,.0f}")
+        st.caption(
+            "※ 破産確率はサンプル数（シミュレーション手数）が少ないとシード"
+            "（実行ごとの乱数）によって結果が大きくブレます。カウンティングの"
+            "エッジは0.3〜0.8%程度と薄いため、安定した値を見たい場合は"
+            "シミュレーション手数を多め（500万手以上を推奨）に設定してください。")
 
         st.caption(
             f"P 値（純利益 > 0 の有意性・片側）: {res.p_value:.4f} / "
