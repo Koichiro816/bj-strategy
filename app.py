@@ -660,17 +660,17 @@ with tab3:
 
         if auto_scale:
             final_bankroll = bankroll + res.net_profit
-            if final_bankroll > 0:
+            if res.stopped_early:
+                st.warning(
+                    f"バンクロールが枯渇したため、設定手数 {int(num_hands):,} 手のうち "
+                    f"{res.num_hands:,} 手でシミュレーションを終了しました"
+                    "（バンクロール比例ベットでは、バンクロールが尽きた時点でプレイを"
+                    "継続できないため停止します）。以降の統計はこの実プレイ手数に基づきます。")
+            else:
                 st.caption(
                     f"バンクロール比例ベット適用中: 開始時バンクロール {bankroll:,.0f} → "
                     f"終了時バンクロール {final_bankroll:,.0f}（×{final_bankroll / bankroll:.3f}）。"
                     "シミュレーション中はこの比率で各ハンドの賭け額が動的に増減しています。")
-            else:
-                st.caption(
-                    f"バンクロール比例ベット適用中: 開始時バンクロール {bankroll:,.0f} → "
-                    f"終了時バンクロール {final_bankroll:,.0f}。"
-                    "シミュレーション中にバンクロールが枯渇しています"
-                    "（枯渇後はベット額が下限の1まで縮小しつつ続行した結果です）。")
 
         if res.bankroll_curve:
             sample_every = max(1, res.curve_sample_every)

@@ -54,6 +54,7 @@ class SimResult:
     return_pct: float = 0.0    # 還元率(%)
     bankroll_curve: list = field(default_factory=list)
     curve_sample_every: int = 1  # bankroll_curveの各点が何ハンドおきのサンプルか
+    stopped_early: bool = False  # バンクロール枯渇により設定手数に達する前に終了したか
 
 
 class Shoe:
@@ -119,7 +120,10 @@ def _bet_size(tc: float, config: SimConfig, current_bankroll: float) -> float:
     if config.bankroll_scaling and config.bankroll > 0:
         bet *= current_bankroll / config.bankroll
 
-    return max(1.0, bet)
+    # テーブルの実質的な最低ベット(config.min_bet)を下回らないようにする
+    # （スケール後の値をハードコードの1で下限にすると、min_bet>1設定時に
+    # 設定した最低ベットより小さい賭け額になってしまう）
+    return max(config.min_bet, bet)
 
 
 def _hand_total(cards):
@@ -295,6 +299,8 @@ def simulate(config: SimConfig) -> SimResult:
     sample_every = max(1, config.num_hands // 2000)
 
     use_count_strategy = config.use_counting or config.strategy == "counting"
+    hands_played = config.num_hands
+    stopped_early = False
 
     for i in range(config.num_hands):
         if shoe.needs_shuffle():
@@ -349,6 +355,10 @@ def simulate(config: SimConfig) -> SimResult:
                 ruined = True
             if i % sample_every == 0:
                 curve_sample.append(net)
+            if config.bankroll_scaling and bankroll <= 0:
+                hands_played = i + 1
+                stopped_early = True
+                break
             continue
         else:
             if insurance_bet > 0:
@@ -369,8 +379,14 @@ def simulate(config: SimConfig) -> SimResult:
             dd = peak - bankroll
             if dd > max_dd:
                 max_dd = dd
+            if bankroll <= 0 and not ruined:
+                ruined = True
             if i % sample_every == 0:
                 curve_sample.append(net)
+            if config.bankroll_scaling and bankroll <= 0:
+                hands_played = i + 1
+                stopped_early = True
+                break
             continue
 
         # プレイヤーのプレイ
@@ -392,8 +408,14 @@ def simulate(config: SimConfig) -> SimResult:
             dd = peak - bankroll
             if dd > max_dd:
                 max_dd = dd
+            if bankroll <= 0 and not ruined:
+                ruined = True
             if i % sample_every == 0:
                 curve_sample.append(net)
+            if config.bankroll_scaling and bankroll <= 0:
+                hands_played = i + 1
+                stopped_early = True
+                break
             continue
 
         # ディーラープレイ（プレイヤーが全バストでなければ）
@@ -443,8 +465,12 @@ def simulate(config: SimConfig) -> SimResult:
             ruined = True
         if i % sample_every == 0:
             curve_sample.append(net)
+        if config.bankroll_scaling and bankroll <= 0:
+            hands_played = i + 1
+            stopped_early = True
+            break
 
-    n = config.num_hands
+    n = hands_played
     win_rate = wins / n
     push_rate = pushes / n
 
@@ -502,6 +528,7 @@ def simulate(config: SimConfig) -> SimResult:
         return_pct=return_pct,
         bankroll_curve=curve_sample,
         curve_sample_every=sample_every,
+        stopped_early=stopped_early,
     )
 
 
