@@ -613,7 +613,7 @@ with tab3:
             value=1_000_000)
         use_counting = st.checkbox("カウンティング戦略 (Hi-Lo)", value=False)
     with col2:
-        bankroll = st.number_input("バンクロール（絶対額）", 1, 10_000_000, 100, step=1)
+        bankroll = st.number_input("バンクロール（絶対額）", 1, 10_000_000, 1000, step=1)
         max_bet = st.number_input("マックスベット（絶対額）", 1, 1_000_000, 1000, step=1,
                                   key="sim_max_bet")
 
@@ -624,8 +624,8 @@ with tab3:
             if _key in st.session_state and st.session_state[_key] > max_bet:
                 st.session_state[_key] = max_bet
 
-        min_bet = st.number_input("ミニマムベット（絶対額）", 1, int(max_bet), 1, step=1,
-                                  key="sim_min_bet")
+        min_bet = st.number_input("ミニマムベット（絶対額）", 1, int(max_bet),
+                                  min(10, int(max_bet)), step=1, key="sim_min_bet")
 
     auto_scale = False
     if use_counting:
@@ -646,13 +646,13 @@ with tab3:
         c1, c2, c3 = st.columns(3)
         with c1:
             m1 = st.number_input("TC ≥ +1 賭け額（絶対額）", 1, int(max_bet),
-                                 min(2, int(max_bet)), step=1, key="sim_m1")
+                                 min(20, int(max_bet)), step=1, key="sim_m1")
         with c2:
             m2 = st.number_input("TC ≥ +2 賭け額（絶対額）", 1, int(max_bet),
-                                 min(4, int(max_bet)), step=1, key="sim_m2")
+                                 min(40, int(max_bet)), step=1, key="sim_m2")
         with c3:
             m3 = st.number_input("TC ≥ +3 賭け額（絶対額）", 1, int(max_bet),
-                                 min(6, int(max_bet)), step=1, key="sim_m3")
+                                 min(60, int(max_bet)), step=1, key="sim_m3")
         bet_spread = {1: m1, 2: m2, 3: m3}
 
     if st.button("シミュレーション実行", type="primary"):
