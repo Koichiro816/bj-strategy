@@ -100,6 +100,24 @@ class Shoe:
         return self.running_count / remaining_decks
 
 
+def _tier_bet(tc: float, config: SimConfig) -> float:
+    """TCに応じた「設定上の」賭け額を返す（bankroll_scalingによる調整前の値）。
+
+    bet_spread/min_betの閾値テーブルそのものを参照する、開始時バンクロール
+    基準の固定値。破産確率の算出で、実現したバンクロールの経路（運の良し悪し）
+    に依存しない安定した基準値として使う。
+    """
+    if not config.use_counting or not config.bet_spread:
+        return config.min_bet
+    bet = config.min_bet
+    # 閾値の高い順に評価して最大のものを採用
+    for thr in sorted(config.bet_spread.keys()):
+        if tc >= thr:
+            bet = config.bet_spread[thr]
+    # TCが閾値未満（負の局面）はミニマムベット
+    return bet
+
+
 def _bet_size(tc: float, config: SimConfig, current_bankroll: float) -> float:
     """TCに応じたベット額（絶対値）を返す。
 
@@ -107,15 +125,7 @@ def _bet_size(tc: float, config: SimConfig, current_bankroll: float) -> float:
     基準の値として扱い、現在のバンクロールが開始時から増減した比率で
     実際のベット額を動的にスケールする（バンクロール比例ベット）。
     """
-    if not config.use_counting or not config.bet_spread:
-        bet = config.min_bet
-    else:
-        bet = config.min_bet
-        # 閾値の高い順に評価して最大のものを採用
-        for thr in sorted(config.bet_spread.keys()):
-            if tc >= thr:
-                bet = config.bet_spread[thr]
-        # TCが閾値未満（負の局面）はミニマムベット
+    bet = _tier_bet(tc, config)
 
     if config.bankroll_scaling and config.bankroll > 0:
         bet *= current_bankroll / config.bankroll
@@ -288,8 +298,14 @@ def simulate(config: SimConfig) -> SimResult:
     losses = 0
     sum_x = 0.0      # 1手あたり結果の和（ベット正規化、SD/P値表示用）
     sum_x2 = 0.0     # 二乗和（標準偏差用）
-    sum_profit = 0.0   # 1手あたり結果の和（絶対額、破産確率用）
-    sum_profit2 = 0.0  # 二乗和（絶対額、破産確率用）
+    # 破産確率用: 「設定上のベット額(ref_bet)」を使った場合の1手あたり結果。
+    # 実現したバンクロールの経路（bankroll_scaling時の運の良し悪し）に
+    # 依存しない、戦略・賭け方そのものに基づく安定した統計量とするため、
+    # 実際のベット額ではなく ref_bet で重み付けする。
+    sum_profit = 0.0
+    sum_profit2 = 0.0
+    gross_win = 0.0   # プロフィットファクター用: 実際の勝ちハンドの合計利益
+    gross_loss = 0.0  # プロフィットファクター用: 実際の負けハンドの合計損失(絶対値)
 
     bankroll = config.bankroll
     peak = config.bankroll
@@ -308,6 +324,7 @@ def simulate(config: SimConfig) -> SimResult:
 
         tc = shoe.true_count() if use_count_strategy else None
         bet = _bet_size(tc if tc is not None else 0.0, config, bankroll)
+        ref_bet = _tier_bet(tc if tc is not None else 0.0, config)
 
         # 配札
         player = [shoe.deal(), shoe.deal()]
@@ -341,10 +358,15 @@ def simulate(config: SimConfig) -> SimResult:
             net += hand_result
             bankroll += hand_result
             _update_stats_local = True
-            sum_x += hand_result / bet if bet else 0
-            sum_x2 += (hand_result / bet) ** 2 if bet else 0
-            sum_profit += hand_result
-            sum_profit2 += hand_result ** 2
+            ratio = hand_result / bet if bet else 0.0
+            sum_x += ratio
+            sum_x2 += ratio ** 2
+            sum_profit += ratio * ref_bet
+            sum_profit2 += (ratio * ref_bet) ** 2
+            if hand_result > 0:
+                gross_win += hand_result
+            elif hand_result < 0:
+                gross_loss += -hand_result
             # ドローダウン
             if bankroll > peak:
                 peak = bankroll
@@ -370,10 +392,15 @@ def simulate(config: SimConfig) -> SimResult:
             wins += 1
             net += hand_result
             bankroll += hand_result
-            sum_x += hand_result / bet if bet else 0
-            sum_x2 += (hand_result / bet) ** 2 if bet else 0
-            sum_profit += hand_result
-            sum_profit2 += hand_result ** 2
+            ratio = hand_result / bet if bet else 0.0
+            sum_x += ratio
+            sum_x2 += ratio ** 2
+            sum_profit += ratio * ref_bet
+            sum_profit2 += (ratio * ref_bet) ** 2
+            if hand_result > 0:
+                gross_win += hand_result
+            elif hand_result < 0:
+                gross_loss += -hand_result
             if bankroll > peak:
                 peak = bankroll
             dd = peak - bankroll
@@ -399,10 +426,15 @@ def simulate(config: SimConfig) -> SimResult:
             losses += 1
             net += hand_result
             bankroll += hand_result
-            sum_x += hand_result / bet if bet else 0
-            sum_x2 += (hand_result / bet) ** 2 if bet else 0
-            sum_profit += hand_result
-            sum_profit2 += hand_result ** 2
+            ratio = hand_result / bet if bet else 0.0
+            sum_x += ratio
+            sum_x2 += ratio ** 2
+            sum_profit += ratio * ref_bet
+            sum_profit2 += (ratio * ref_bet) ** 2
+            if hand_result > 0:
+                gross_win += hand_result
+            elif hand_result < 0:
+                gross_loss += -hand_result
             if bankroll > peak:
                 peak = bankroll
             dd = peak - bankroll
@@ -451,10 +483,15 @@ def simulate(config: SimConfig) -> SimResult:
 
         net += hand_result
         bankroll += hand_result
-        sum_x += hand_result / bet if bet else 0
-        sum_x2 += (hand_result / bet) ** 2 if bet else 0
-        sum_profit += hand_result
-        sum_profit2 += hand_result ** 2
+        ratio = hand_result / bet if bet else 0.0
+        sum_x += ratio
+        sum_x2 += ratio ** 2
+        sum_profit += ratio * ref_bet
+        sum_profit2 += (ratio * ref_bet) ** 2
+        if hand_result > 0:
+            gross_win += hand_result
+        elif hand_result < 0:
+            gross_loss += -hand_result
 
         if bankroll > peak:
             peak = bankroll
@@ -492,22 +529,24 @@ def simulate(config: SimConfig) -> SimResult:
         p_value = 0.5
 
     # プロフィットファクター（総利益/総損失）
-    # 近似: 期待利益と標準偏差から推定するのは難しいため、
-    # ここでは net>0 を利益側、平均損失をstdから近似する簡易PF
-    gross_profit = max(net, 0) + abs(min(net, 0)) * 0  # placeholder
-    # より実用的に: PF ≒ (mean+std)/(std-mean) 近似は不安定なため、
-    # 累積ベースで: total_wagered*(1+edge) / total_wagered としない。
-    # 勝ち手・負け手の概算でPFを出す。
-    avg_bet = total_wagered / n if n else 1
-    est_gross_win = (win_rate) * avg_bet * n
-    est_gross_loss = (1 - win_rate - push_rate) * avg_bet * n
-    profit_factor = (est_gross_win / est_gross_loss) if est_gross_loss > 0 else float("inf")
+    # 旧実装は win_rate/loss_rate で近似していたが、これはベットサイズや
+    # BJ配当(3:2)・ダブル・サレンダー等の非対称な損益額を一切反映せず、
+    # 単純な勝ちハンド数/負けハンド数の比に等しくなってしまう。
+    # ブラックジャックは（エッジが正でも）負けハンド数が勝ちハンド数を
+    # 上回るのが通常なため、この近似は損益に関わらず常に1未満になる
+    # 不具合があった。実際の勝ちハンド・負けハンドの金額を集計した
+    # gross_win/gross_lossを使い、文字通りの総利益/総損失を算出する。
+    profit_factor = (gross_win / gross_loss) if gross_loss > 0 else float("inf")
 
     # 破産確率（解析近似 Risk of Ruin）
     # bankrollは絶対額のため、mean/std_devを絶対額（同じ単位）で再計算する。
     # sum_x/std_dev はベット正規化値であり、可変ベット時にbankrollと単位が
     # 食い違うため使用しない（例: 加重平均edgeが正でも頻度の高い最小ベット時の
     # 不利な手が単純平均を負に引き込み、破産確率が常に100%になる不具合があった）。
+    # さらにsum_profit/sum_profit2は実際のベット額ではなくref_bet（バンクロール
+    # スケーリング適用前の設定値）で重み付けしており、bankroll_scaling時に
+    # 「枯渇直前の不運な実現パス」だけで mean<=0 と判定され、同条件でも
+    # シード次第で結果が大きく変わってしまう問題を緩和している。
     mean_profit = sum_profit / n
     var_profit = sum_profit2 / n - mean_profit ** 2
     std_profit = math.sqrt(var_profit) if var_profit > 0 else 0.0
