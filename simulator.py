@@ -30,9 +30,10 @@ class SimConfig:
     rules: HouseRules
     num_hands: int = 1_000_000
     use_counting: bool = False
-    bet_spread: Optional[dict] = None   # {TC_threshold: 賭け額（絶対値）} 例 {1:2,2:4,3:6}
-    min_bet: float = 1.0                # ミニマムベット（絶対値）
-    bankroll: float = 100.0             # バンクロール（絶対値）
+    bet_spread: Optional[dict] = None   # {TC_threshold: 賭け額（絶対値、開始時バンクロール基準）} 例 {1:2,2:4,3:6}
+    min_bet: float = 1.0                # ミニマムベット（絶対値、開始時バンクロール基準）
+    bankroll: float = 100.0             # バンクロール（絶対値、シミュレーション開始時の値）
+    bankroll_scaling: bool = False      # True: 各ハンドの賭け額を「現在のバンクロール/開始時バンクロール」の比率で動的にスケールする
     strategy: str = "basic"             # "basic" or "counting"
     seed: Optional[int] = None
 
@@ -98,17 +99,27 @@ class Shoe:
         return self.running_count / remaining_decks
 
 
-def _bet_size(tc: float, config: SimConfig) -> float:
-    """TCに応じたベット額（絶対値）を返す。"""
+def _bet_size(tc: float, config: SimConfig, current_bankroll: float) -> float:
+    """TCに応じたベット額（絶対値）を返す。
+
+    bankroll_scaling=True の場合、bet_spread/min_betは「開始時バンクロール」
+    基準の値として扱い、現在のバンクロールが開始時から増減した比率で
+    実際のベット額を動的にスケールする（バンクロール比例ベット）。
+    """
     if not config.use_counting or not config.bet_spread:
-        return config.min_bet
-    bet = config.min_bet
-    # 閾値の高い順に評価して最大のものを採用
-    for thr in sorted(config.bet_spread.keys()):
-        if tc >= thr:
-            bet = config.bet_spread[thr]
-    # TCが閾値未満（負の局面）はミニマムベット
-    return bet
+        bet = config.min_bet
+    else:
+        bet = config.min_bet
+        # 閾値の高い順に評価して最大のものを採用
+        for thr in sorted(config.bet_spread.keys()):
+            if tc >= thr:
+                bet = config.bet_spread[thr]
+        # TCが閾値未満（負の局面）はミニマムベット
+
+    if config.bankroll_scaling and config.bankroll > 0:
+        bet *= current_bankroll / config.bankroll
+
+    return max(1.0, bet)
 
 
 def _hand_total(cards):
@@ -290,7 +301,7 @@ def simulate(config: SimConfig) -> SimResult:
             shoe._build()
 
         tc = shoe.true_count() if use_count_strategy else None
-        bet = _bet_size(tc if tc is not None else 0.0, config)
+        bet = _bet_size(tc if tc is not None else 0.0, config, bankroll)
 
         # 配札
         player = [shoe.deal(), shoe.deal()]
