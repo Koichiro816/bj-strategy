@@ -100,3 +100,168 @@ def holecard_loss_example_figure():
            ha="center", fontsize=8.5, color="#607D8B", transform=ax.transAxes)
     fig.tight_layout()
     return fig
+
+
+def hilo_tag_figure():
+    """Hi-Loのカードタグ付けを「低い/中間/高い」の3グループで色分けして見せる。"""
+    fig, ax = plt.subplots(figsize=(8.0, 3.0))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 2.6)
+    ax.axis("off")
+
+    groups = [
+        ("2・3・4・5・6", "+1", "#C8E6C9", "#1B5E20", "低いカード\n（出るほど有利）"),
+        ("7・8・9", "0", "#ECEFF1", "#37474F", "中間\n（無視してよい）"),
+        ("10・J・Q・K・A", "−1", "#FFCDD2", "#B71C1C", "高いカード\n（出るほど不利）"),
+    ]
+    w, gap = 2.85, 0.35
+    x = 0.25
+    for cards, tag, bg, fg, note in groups:
+        box = FancyBboxPatch((x, 1.15), w, 1.0, facecolor=bg, edgecolor="#37474F",
+                             linewidth=1.2, boxstyle="round,pad=0.02,rounding_size=0.08")
+        ax.add_patch(box)
+        ax.text(x + w / 2, 1.85, cards, ha="center", va="center",
+                fontsize=10.5, fontweight="bold", color=fg)
+        ax.text(x + w / 2, 1.40, f"タグ {tag}", ha="center", va="center",
+                fontsize=12, fontweight="bold", color=fg)
+        ax.text(x + w / 2, 0.55, note, ha="center", va="center",
+                fontsize=9, color="#455A64", linespacing=1.4)
+        x += w + gap
+
+    ax.set_title("Hi-Lo：カードが出るたびに加えるタグ", fontsize=12,
+                fontweight="bold", color="#1A237E", pad=10)
+    fig.tight_layout()
+    return fig
+
+
+def running_to_true_count_figure():
+    """実際に数枚のカードが出た様子からRCが積み上がり、残りデッキ数で割ってTCになる流れを示す。"""
+    fig, ax = plt.subplots(figsize=(9.0, 3.6))
+    ax.set_xlim(-0.3, 10.6)
+    ax.set_ylim(0, 3.4)
+    ax.axis("off")
+
+    cards = [("5", "+1", "#C8E6C9", "#1B5E20"), ("K", "−1", "#FFCDD2", "#B71C1C"),
+             ("2", "+1", "#C8E6C9", "#1B5E20"), ("9", "0", "#ECEFF1", "#37474F"),
+             ("3", "+1", "#C8E6C9", "#1B5E20"), ("A", "−1", "#FFCDD2", "#B71C1C"),
+             ("6", "+1", "#C8E6C9", "#1B5E20"), ("4", "+1", "#C8E6C9", "#1B5E20")]
+
+    card_w, card_h, gap = 0.95, 1.15, 0.25
+    x = 0.15
+    rc = 0
+    for card, tag, bg, fg in cards:
+        box = FancyBboxPatch((x, 1.9), card_w, card_h, facecolor=bg, edgecolor="#37474F",
+                             linewidth=1.1, boxstyle="round,pad=0.02,rounding_size=0.10")
+        ax.add_patch(box)
+        ax.text(x + card_w / 2, 1.9 + card_h * 0.62, card, ha="center", va="center",
+                fontsize=13, fontweight="bold", color="#212121")
+        ax.text(x + card_w / 2, 1.9 + card_h * 0.22, tag, ha="center", va="center",
+                fontsize=9.5, fontweight="bold", color=fg)
+        rc += int(tag.replace("−", "-"))
+        ax.text(x + card_w / 2, 1.55, f"RC={rc:+d}", ha="center", va="center",
+                fontsize=8.3, color="#607D8B")
+        x += card_w + gap
+
+    ax.annotate("", xy=(5.3, 0.95), xytext=(5.3, 1.75),
+               arrowprops=dict(arrowstyle="-|>", color="#78909C", lw=1.8))
+    _add_step_box(ax, 3.3, 0.05, 4.0, 0.85,
+                 f"最終 RC = {rc:+d}　÷　残り3デッキ　＝　TC {rc/3:+.1f}",
+                 "#FFE0B2", fontsize=10.5)
+
+    ax.set_title("カードが出るたびにRCを更新し、残りデッキ数で割ってTCにする",
+                fontsize=11.5, fontweight="bold", color="#1A237E", pad=10)
+    fig.tight_layout()
+    return fig
+
+
+_ACTION_GREEN = "#C8E6C9"
+_ACTION_RED = "#FFCDD2"
+
+
+def index_play_figure():
+    """最も有名なインデックスプレイ「16 vs 10」を例に、TCの境界で正解が切り替わる様子を示す。"""
+    fig, ax = plt.subplots(figsize=(8.2, 2.6))
+    ax.set_xlim(-2.2, 4.2)
+    ax.set_ylim(0, 2.0)
+    ax.axis("off")
+
+    ax.annotate("", xy=(4.0, 1.0), xytext=(-2.0, 1.0),
+               arrowprops=dict(arrowstyle="-|>", color="#37474F", lw=1.8))
+    for tc in range(-2, 5):
+        ax.plot([tc, tc], [0.92, 1.08], color="#37474F", lw=1.4)
+        ax.text(tc, 0.7, f"{tc:+d}" if tc != 0 else "0", ha="center", fontsize=9.5, color="#37474F")
+    ax.text(-2.0, 1.35, "TC", fontsize=10, color="#37474F", fontweight="bold")
+
+    _add_step_box(ax, -2.05, 1.5, 1.85, 0.5, "TC < 0\nH（ヒット）", _ACTION_RED, fontsize=9.5)
+    _add_step_box(ax, 0.15, 1.5, 1.85, 0.5, "TCが0以上\nS（スタンド）", _ACTION_GREEN, fontsize=9.5)
+    ax.annotate("", xy=(0.0, 1.45), xytext=(0.0, 1.12),
+               arrowprops=dict(arrowstyle="-|>", color="#BF360C", lw=2.0))
+
+    ax.set_title("インデックスプレイの例：「16 vs 10」はTC=0で正解が切り替わる",
+                fontsize=11.5, fontweight="bold", color="#1A237E", pad=12)
+    fig.tight_layout()
+    return fig
+
+
+def insurance_ev_figure():
+    """デッキ中の10点カードの割合が、保険の損益分岐点（1/3）をTCによって超えるかどうかを示す。"""
+    fig, ax = plt.subplots(figsize=(6.4, 3.6))
+    labels = ["TC = 0\n（ニュートラル）", "TC = +3\n（カード濃度UP）"]
+    values = [4 / 13 * 100, 38.0]
+    colors = ["#FFCDD2", "#C8E6C9"]
+
+    bars = ax.bar(labels, values, color=colors, edgecolor="#37474F", linewidth=1.2, width=0.5)
+    for bar, v in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, v + 1.2, f"{v:.1f}%",
+                ha="center", fontsize=12.5, fontweight="bold", color="#212121")
+
+    ax.axhline(100 / 3, color="#BF360C", linestyle="--", lw=1.6)
+    ax.text(1.55, 100 / 3 + 0.8, "損益分岐点 33.3%\n（保険が2:1で\n払われるため）",
+            fontsize=8.3, color="#BF360C", va="bottom", linespacing=1.3)
+
+    ax.set_ylim(0, 46)
+    ax.set_ylabel("残りデッキ中の「10点カード」の割合")
+    ax.set_title("保険が得になるのは、10点カードの割合が33.3%を超えたとき",
+                fontsize=10.8, fontweight="bold", color="#1A237E")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.tight_layout()
+    return fig
+
+
+def penetration_figure():
+    """シューから配るデッキ量（ペネトレーション）の違いを3パターン並べて視覚化する。"""
+    fig, ax = plt.subplots(figsize=(8.2, 3.4))
+    ax.set_xlim(0, 10.4)
+    ax.set_ylim(0, 3.4)
+    ax.axis("off")
+
+    patterns = [
+        ("50%（浅い）", 0.50, "#FFCDD2"),
+        ("75%（標準的）", 0.75, "#FFE0B2"),
+        ("83%（深い）", 0.83, "#C8E6C9"),
+    ]
+    bar_w = 8.0
+    for i, (label, frac, color) in enumerate(patterns):
+        y = 2.5 - i * 1.05
+        ax.text(-0.1, y + 0.4, label, ha="left", va="center", fontsize=10,
+                fontweight="bold", color="#1A237E")
+        outline = FancyBboxPatch((1.6, y), bar_w, 0.62, facecolor="#ECEFF1",
+                                 edgecolor="#37474F", linewidth=1.2,
+                                 boxstyle="round,pad=0.0,rounding_size=0.05")
+        ax.add_patch(outline)
+        dealt = FancyBboxPatch((1.6, y), bar_w * frac, 0.62, facecolor=color,
+                               edgecolor="#37474F", linewidth=1.0,
+                               boxstyle="round,pad=0.0,rounding_size=0.05")
+        ax.add_patch(dealt)
+        ax.text(1.6 + bar_w * frac / 2, y + 0.31, "配るゾーン", ha="center", va="center",
+                fontsize=8.5, color="#212121")
+        if frac < 0.97:
+            ax.text(1.6 + bar_w * frac + (bar_w * (1 - frac)) / 2, y + 0.31,
+                    "シャッフル\nカード以降", ha="center", va="center",
+                    fontsize=7.3, color="#607D8B", linespacing=1.2)
+
+    ax.set_title("ペネトレーション：シューの何%を配ってからシャッフルするか",
+                fontsize=11.5, fontweight="bold", color="#1A237E", pad=10)
+    fig.tight_layout()
+    return fig
