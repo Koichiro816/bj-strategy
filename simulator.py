@@ -271,8 +271,10 @@ def simulate(config: SimConfig) -> SimResult:
     wins = 0
     pushes = 0
     losses = 0
-    sum_x = 0.0      # 1手あたり結果の和
+    sum_x = 0.0      # 1手あたり結果の和（ベット正規化、SD/P値表示用）
     sum_x2 = 0.0     # 二乗和（標準偏差用）
+    sum_profit = 0.0   # 1手あたり結果の和（絶対額、破産確率用）
+    sum_profit2 = 0.0  # 二乗和（絶対額、破産確率用）
 
     bankroll = config.bankroll
     peak = config.bankroll
@@ -324,6 +326,8 @@ def simulate(config: SimConfig) -> SimResult:
             _update_stats_local = True
             sum_x += hand_result / bet if bet else 0
             sum_x2 += (hand_result / bet) ** 2 if bet else 0
+            sum_profit += hand_result
+            sum_profit2 += hand_result ** 2
             # ドローダウン
             if bankroll > peak:
                 peak = bankroll
@@ -347,6 +351,8 @@ def simulate(config: SimConfig) -> SimResult:
             bankroll += hand_result
             sum_x += hand_result / bet if bet else 0
             sum_x2 += (hand_result / bet) ** 2 if bet else 0
+            sum_profit += hand_result
+            sum_profit2 += hand_result ** 2
             if bankroll > peak:
                 peak = bankroll
             dd = peak - bankroll
@@ -368,6 +374,8 @@ def simulate(config: SimConfig) -> SimResult:
             bankroll += hand_result
             sum_x += hand_result / bet if bet else 0
             sum_x2 += (hand_result / bet) ** 2 if bet else 0
+            sum_profit += hand_result
+            sum_profit2 += hand_result ** 2
             if bankroll > peak:
                 peak = bankroll
             dd = peak - bankroll
@@ -412,6 +420,8 @@ def simulate(config: SimConfig) -> SimResult:
         bankroll += hand_result
         sum_x += hand_result / bet if bet else 0
         sum_x2 += (hand_result / bet) ** 2 if bet else 0
+        sum_profit += hand_result
+        sum_profit2 += hand_result ** 2
 
         if bankroll > peak:
             peak = bankroll
@@ -457,7 +467,14 @@ def simulate(config: SimConfig) -> SimResult:
     profit_factor = (est_gross_win / est_gross_loss) if est_gross_loss > 0 else float("inf")
 
     # 破産確率（解析近似 Risk of Ruin）
-    ruin_probability = _risk_of_ruin(mean, std_dev, config.bankroll)
+    # bankrollは絶対額のため、mean/std_devを絶対額（同じ単位）で再計算する。
+    # sum_x/std_dev はベット正規化値であり、可変ベット時にbankrollと単位が
+    # 食い違うため使用しない（例: 加重平均edgeが正でも頻度の高い最小ベット時の
+    # 不利な手が単純平均を負に引き込み、破産確率が常に100%になる不具合があった）。
+    mean_profit = sum_profit / n
+    var_profit = sum_profit2 / n - mean_profit ** 2
+    std_profit = math.sqrt(var_profit) if var_profit > 0 else 0.0
+    ruin_probability = _risk_of_ruin(mean_profit, std_profit, config.bankroll)
 
     return SimResult(
         num_hands=n,

@@ -695,13 +695,14 @@ with tab3:
                 margin=dict(l=10, r=10, t=10, b=10), height=400,
                 xaxis=dict(rangeslider=dict(visible=True), type="linear"),
                 hovermode="x unified", dragmode="pan")
-            st.plotly_chart(fig, use_container_width=True,
-                            config={"scrollZoom": True})
+            # scrollZoomはマウスホイールをグラフ側で奪い、ページスクロールが
+            # 効かなくなる（グラフ通過後に上に戻せなくなる）ため有効化しない。
+            st.plotly_chart(fig, use_container_width=True)
             st.caption(
                 f"全 {res.num_hands:,} 手のシミュレーション結果を、"
                 f"{sample_every:,} 手ごとに{len(res.bankroll_curve):,} 点サンプリングして"
                 "累積純利益の推移を表示しています（横軸＝経過ハンド数）。"
-                "グラフはドラッグでパン（移動）、マウスホイールでズーム、"
+                "グラフはドラッグでパン（移動）、"
                 "下部のスライダーで範囲選択、"
                 "ダブルクリックで全体表示にリセットできます。")
 
