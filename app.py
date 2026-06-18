@@ -347,6 +347,14 @@ _BORDER  = "border:1px solid #CFD8DC"
 # （Excelの「ウィンドウ枠の固定」と同様、左の見出し列だけ追従させる）
 _STICKY_COL = ("position:sticky;left:0;z-index:3;"
               "box-shadow:2px 0 4px -2px rgba(0,0,0,0.25);")
+# ディーラーのアップカード行（見出し行）をスマホ横向き時の縦スクロールでも
+# 上端に固定表示するためのsticky指定。
+_STICKY_TOP = ("position:sticky;top:0;z-index:4;"
+              "box-shadow:0 2px 4px -2px rgba(0,0,0,0.25);")
+# 左上の角セル（Hand列の見出し）は横スクロール・縦スクロールの両方で
+# 固定する必要があるため、left/top両方をstickyにする。
+_STICKY_COL_TOP = ("position:sticky;left:0;top:0;z-index:5;"
+                   "box-shadow:2px 2px 4px -2px rgba(0,0,0,0.25);")
 
 
 def _cell_style(act, is_changed):
@@ -363,12 +371,15 @@ def render_strategy_html(data_dict, row_keys, row_labels,
     if changed is None:
         changed = set()
     html = [
-        '<div style="overflow-x:auto;border-radius:8px;'
+        # overflow-yを明示的にvisibleにしないと、overflow-x:autoの指定だけで
+        # ブラウザがY軸も暗黙的にスクロールコンテナ化してしまい、見出し行の
+        # position:sticky;top:0が画面（ページ）スクロールに追従しなくなる。
+        '<div style="overflow-x:auto;overflow-y:visible;border-radius:8px;'
         'box-shadow:0 2px 10px rgba(0,0,0,0.1);">',
         '<table style="border-collapse:collapse;width:100%;'
         'font-size:13px;text-align:center;min-width:480px;">',
     ]
-    # 行1: DEALER UPCARD スパン
+    # 行1: DEALER UPCARD スパン（装飾的な見出しのため固定はしない）
     html.append(
         f'<tr>'
         f'<th style="{_HDR_BG};{_STICKY_COL}color:transparent;padding:4px;'
@@ -378,14 +389,14 @@ def render_strategy_html(data_dict, row_keys, row_labels,
         f'▼ &nbsp; D E A L E R &nbsp; U P C A R D &nbsp; ▼'
         f'</th></tr>'
     )
-    # 行2: アップカード数字
+    # 行2: アップカード数字（スマホ横向きでの縦スクロール時も上端に固定）
     html.append('<tr>')
     html.append(
-        f'<th style="{_HAND_BG};{_STICKY_COL}color:#546E7A;padding:5px 4px;'
+        f'<th style="{_HAND_BG};{_STICKY_COL_TOP}color:#546E7A;padding:5px 4px;'
         f'{_BORDER};font-size:0.75rem;font-weight:600;">Hand</th>')
     for u in UPCARDS:
         html.append(
-            f'<th style="{_UPCD_BG};color:#E3F2FD;padding:5px 8px;'
+            f'<th style="{_UPCD_BG};{_STICKY_TOP}color:#E3F2FD;padding:5px 8px;'
             f'{_BORDER};font-weight:700;">{_up_label(u)}</th>')
     html.append('</tr>')
     # データ行
