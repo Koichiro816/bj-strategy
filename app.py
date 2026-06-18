@@ -371,11 +371,13 @@ def render_strategy_html(data_dict, row_keys, row_labels,
     if changed is None:
         changed = set()
     html = [
-        # overflow-yを明示的にvisibleにしないと、overflow-x:autoの指定だけで
-        # ブラウザがY軸も暗黙的にスクロールコンテナ化してしまい、見出し行の
-        # position:sticky;top:0が画面（ページ）スクロールに追従しなくなる。
-        '<div style="overflow-x:auto;overflow-y:visible;border-radius:8px;'
-        'box-shadow:0 2px 10px rgba(0,0,0,0.1);">',
+        # ページ全体のスクロールに対するposition:sticky;top:0は、Streamlit側の
+        # コンテナ構成（タブパネル等のoverflow指定）に依存して効かない場合がある。
+        # そのため、この div 自体に max-height + overflow-y:auto を持たせて
+        # 「このdiv内だけでスクロールする」専用のスクロールコンテナとし、
+        # sticky-topを確実にこのdivの内部スクロールに追従させる。
+        '<div style="overflow-x:auto;overflow-y:auto;max-height:65vh;'
+        'border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);">',
         '<table style="border-collapse:collapse;width:100%;'
         'font-size:13px;text-align:center;min-width:480px;">',
     ]
