@@ -348,6 +348,38 @@ def simulate(config: SimConfig) -> SimResult:
         player_bj = _is_blackjack(player)
         dealer_bj = _is_blackjack(dealer)
 
+        # アーリーサレンダー（ディーラーのBJピーク前に判断する稀少ルール）。
+        # ピーク後に判断するレイトサレンダーと異なり、サレンダーを選んだ場合は
+        # ディーラーの手札に関わらず賭け金の半分のみを失う。
+        if (rules.surrender == "early" and not player_bj
+                and _lookup_action(player, dealer_up, strat_table, rules,
+                                   can_double=False, can_split=False,
+                                   can_surrender=True, tc=tc) == "R"):
+            hand_result -= bet * 0.5
+            losses += 1
+            net += hand_result
+            bankroll += hand_result
+            ratio = hand_result / bet if bet else 0.0
+            sum_x += ratio
+            sum_x2 += ratio ** 2
+            sum_profit += ratio * ref_bet
+            sum_profit2 += (ratio * ref_bet) ** 2
+            gross_loss += -hand_result
+            if bankroll > peak:
+                peak = bankroll
+            dd = peak - bankroll
+            if dd > max_dd:
+                max_dd = dd
+            if bankroll <= 0 and not ruined:
+                ruined = True
+            if i % sample_every == 0:
+                curve_sample.append(net)
+            if config.bankroll_scaling and bankroll <= 0:
+                hands_played = i + 1
+                stopped_early = True
+                break
+            continue
+
         # ピーク処理（US式: ディーラーBJを即確認）
         if rules.dealer_peeks and dealer_bj:
             # インシュランス精算

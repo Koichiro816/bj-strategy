@@ -301,6 +301,15 @@ def ev_surrender() -> float:
     return -0.5
 
 
+def dealer_bj_prob(upcard: int, tc: float = 0) -> float:
+    """アップカードからディーラーがBJになる確率（ピーク前の無条件確率）。"""
+    if upcard == 11:
+        return card_prob_tc(10, tc)
+    if upcard == 10:
+        return card_prob_tc(11, tc)
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # 最適アクション
 # ---------------------------------------------------------------------------
@@ -327,12 +336,26 @@ def best_action(player_total: int, soft: bool, is_pair: bool,
     if can_double and rules.can_double_total(player_total if not soft else player_total):
         candidates["D"] = ev_double(player_total, soft, dealer_upcard, rules, tc)
 
-    if can_surrender and rules.surrender != "none":
-        if dealer_upcard != 11 or rules.surrender_vs_ace:
-            candidates["R"] = ev_surrender()
-
     if is_pair and can_split:
         candidates["P"] = ev_split(pair_rank, dealer_upcard, rules, tc)
+
+    if can_surrender and rules.surrender != "none":
+        if dealer_upcard != 11 or rules.surrender_vs_ace:
+            r_ev = ev_surrender()
+            # アーリーサレンダー（ディーラーのBJピーク前の判断）の場合、
+            # 比較対象となる他アクションのEVも「ディーラーBJで即座に賭け金全額を失うリスク」
+            # を含む無条件版に補正する。レイトサレンダー（ピーク後）はこのリスクが
+            # 既に排除された状態での判断のため、補正は不要（peek済みのcandidatesをそのまま使う）。
+            if (rules.surrender == "early" and rules.dealer_peeks
+                    and dealer_upcard in (10, 11)):
+                p_bj = dealer_bj_prob(dealer_upcard, tc)
+                alt_evs = [(1 - p_bj) * v - p_bj * 1.0
+                          for k, v in candidates.items() if k in ("S", "H", "D", "P")]
+                best_alt = max(alt_evs) if alt_evs else -1.0
+                if r_ev > best_alt:
+                    candidates["R"] = r_ev
+            else:
+                candidates["R"] = r_ev
 
     # 最大EVのアクションを選択
     best = max(candidates, key=candidates.get)
