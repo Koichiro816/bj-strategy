@@ -357,6 +357,20 @@ RULESET_PRESETS = {
         "hr_surrender_vs_ace": False,
         "hr_decks_dealt": 4.5,   # 6デッキ中4.5配布＝ペネトレーション75%
     },
+    "インスパイアカジノ（緑テーブル）": {
+        "hr_num_decks": 6,
+        "hr_bj_pay": "3:2 (1.5倍)",
+        "hr_soft17": "H17 (ヒット)",
+        "hr_hole_card": "HC — US式（事前確認あり）",
+        "hr_double": "any（どの2枚でも）",
+        "hr_das": True,
+        "hr_split_aces": True,
+        "hr_draw_split_aces": False,
+        "hr_max_splits": 3,
+        "hr_surrender": "late（レイトサレンダー）",
+        "hr_surrender_vs_ace": False,
+        "hr_decks_dealt": 6.0,   # 6デッキ全配布(100%)＝CSM
+    },
 }
 _RULESET_OPTIONS = ["カスタム（手動設定）"] + list(RULESET_PRESETS.keys())
 
