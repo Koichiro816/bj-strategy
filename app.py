@@ -431,7 +431,7 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
         surrender_vs_ace_ui = st.checkbox(
             "エース対面でのサレンダー可", key="hr_surrender_vs_ace")
         _pen_min = float(max(1, num_decks // 2))
-        _pen_max = max(_pen_min, float(num_decks - 1))
+        _pen_max = float(num_decks)   # 最大=全デッキ配布(100%)＝CSM相当
         # decks_dealt は num_decks に依存。session_state値を範囲にクランプしてから使う
         _dd = st.session_state.get("hr_decks_dealt")
         if _dd is None:
@@ -439,16 +439,22 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
         _dd = min(max(_pen_min, round(_dd * 2) / 2), _pen_max)
         st.session_state["hr_decks_dealt"] = _dd   # スライダー生成前なので変更OK
         decks_dealt = st.slider(
-            "シューから何デッキ配布でシャッフルするか（シミュ用）",
+            "シューから何デッキ配布でシャッフルするか（シミュ用・最大100%＝CSM）",
             min_value=_pen_min,
             max_value=_pen_max,
             step=0.5,
             key="hr_decks_dealt",
         )
         penetration = decks_dealt / num_decks
-        st.caption(
-            f"→ {num_decks}デッキ中 {decks_dealt:g}デッキ配布してシャッフル"
-            f"（ペネトレーション {penetration:.0%}）")
+        if penetration >= 1.0:
+            st.caption(
+                "🔄 **CSM（連続シャッフルマシン）相当**：毎ハンド実質シャッフルされ、"
+                "捨て札が貯まらないため**カウンティングはほぼ無効**になります"
+                "（シミュレーターでも毎ハンド・リシャッフルとして扱います）。")
+        else:
+            st.caption(
+                f"→ {num_decks}デッキ中 {decks_dealt:g}デッキ配布してシャッフル"
+                f"（ペネトレーション {penetration:.0%}）")
 
 blackjack_pays = 1.5 if bj_pay_label.startswith("3:2") else 1.2
 soft17 = "S17" if soft17_label.startswith("S17") else "H17"
@@ -1435,8 +1441,9 @@ HC（US式）では、ディーラーがまずBJを確認し、非BJが判明し
 | 50% | 3デッキ配布 | 低（TCが収束しにくい） |
 | 75% | 4.5デッキ配布 | 中（現実的な標準） |
 | 83% | 5デッキ配布 | 高 |
+| 100%（=CSM） | 全デッキ配布扱い | 無効（毎ハンド・リシャッフル） |
 
-> 💡 CSM（連続シャッフルマシン）は1〜2枚配るごとにシャッフルし直すため、実質ペネトレーション0%＝カウンティング完全無効化です。
+> 💡 CSM（連続シャッフルマシン）は配るそばからシャッフルし直すため、カウンティングは完全に無効です。**本ツールではペネトレーションのスライダーを最大（100%）にするとCSM相当として扱い、シミュレーターが毎ハンド・リシャッフルします**（カウンティングが効かない状況を再現）。
 """)
 
     # ── カードカウンティング ─────────────────────────────────────

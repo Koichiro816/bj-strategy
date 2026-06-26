@@ -81,7 +81,12 @@ class Shoe:
         self.rng.shuffle(self.cards)
         self.pos = 0
         self.running_count = 0
-        self._cut = int(len(self.cards) * self.penetration)
+        if self.penetration >= 1.0:
+            # ペネトレーション100% = CSM（連続シャッフルマシン）相当。
+            # 毎ハンド実質シャッフルし、カウンティングを無効化する。
+            self._cut = 1
+        else:
+            self._cut = int(len(self.cards) * self.penetration)
 
     def needs_shuffle(self) -> bool:
         return self.pos >= self._cut
