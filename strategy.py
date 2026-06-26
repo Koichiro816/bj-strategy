@@ -198,6 +198,46 @@ def ev_stand(player_total: int, dealer_probs: dict) -> float:
     return ev
 
 
+def stand_win_push_lose(player_total: int, dealer_probs: dict) -> dict:
+    """プレイヤーが player_total でスタンドした場合の勝率・引き分け率・負け率を返す。
+
+    #113「17は強いのか？」由来の機能。EV（期待値）だけでなく、
+    win/push/lose の内訳（分布）を解析的に算出する。
+    プレイヤーがバストしていない前提（バスト時は lose=1.0）。
+
+    返り値: {"win": p, "push": p, "lose": p}（合計1.0）
+    """
+    if player_total > 21:
+        return {"win": 0.0, "push": 0.0, "lose": 1.0}
+    win = push = lose = 0.0
+    for d in (17, 18, 19, 20, 21):
+        if player_total > d:
+            win += dealer_probs[d]       # プレイヤーの勝ち
+        elif player_total < d:
+            lose += dealer_probs[d]      # プレイヤーの負け
+        else:
+            push += dealer_probs[d]      # 同点＝プッシュ
+    win += dealer_probs["bust"]          # ディーラーバスト＝プレイヤーの勝ち
+    return {"win": win, "push": push, "lose": lose}
+
+
+def stand_breakdown(player_total: int, dealer_upcard: int,
+                    rules: HouseRules, tc: float = 0) -> dict:
+    """プレイヤーが任意の最終手でスタンドした場合の win/push/lose 内訳を返す（高レベルAPI）。
+
+    アップカードとハウスルールからディーラー最終手分布を求め、
+    stand_win_push_lose() で内訳を算出する。EV（=win-lose）も併せて返す。
+
+    返り値: {"win": p, "push": p, "lose": p, "ev": win-lose,
+             "dealer": {17:p, ..., 'bust':p}}
+    """
+    dealer_probs = dealer_final_probs(dealer_upcard, rules, tc)
+    bd = stand_win_push_lose(player_total, dealer_probs)
+    bd["ev"] = bd["win"] - bd["lose"]
+    bd["dealer"] = dealer_probs
+    return bd
+
+
 @lru_cache(maxsize=None)
 def _ev_hit_cached(player_total: int, soft: bool, dealer_upcard: int,
                    h17: bool, peek: bool, tc: float = 0) -> float:
@@ -496,3 +536,6 @@ if __name__ == "__main__":
     print("16 vs 10:", best_action(16, False, False, 10, True, False, True, r))
     print("11 vs 6:", best_action(11, False, False, 6, True, False, False, r))
     print("A,A vs 5:", best_action(12, True, True, 5, False, True, False, r, pair_rank=11))
+    bd = stand_breakdown(17, 7, r)
+    print("17 vs 7 stand breakdown:",
+          {k: round(v, 4) for k, v in bd.items() if k in ("win", "push", "lose", "ev")})

@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from rules import HouseRules
-from strategy import generate_strategy_table, generate_ev_table
+from strategy import generate_strategy_table, generate_ev_table, stand_breakdown
 from index_plays import (ILLUSTRIOUS_18, FAB_4, get_active_indexes,
                          get_filtered_indexes, should_take_insurance,
                          get_insurance_threshold, apply_tc_overlay)
@@ -225,6 +225,102 @@ def _inject_css():
 _inject_css()
 
 
+# ===========================================================================
+# フリーミアム ゲーティング（無料 / PRO）
+# ---------------------------------------------------------------------------
+# CFO価格戦略（§2-1）に基づくティア設計:
+#   無料 : ベーシックストラテジー表のみ（集客フック・無料勢と同水準）
+#   PRO  : ＋シミュレーター・インデックスプレイ・PDF出力（差別化機能）
+#
+# 【決済連携TODO】
+#   現状は「PROアクセスコード」入力で解放する簡易ゲート。
+#   本番では Stripe / Gumroad 等の決済Webhookで発行したコードを
+#   secrets / DB で検証する方式に差し替える。
+#   想定フロー: 決済完了 → 一意のアクセスコード発行 → ユーザーがサイドバーに入力
+#               → ここで照合（将来は API/DB 照会）→ st.session_state.is_pro = True
+#   それまでは secrets["PRO_CODE"]（単一コード）で運用する。
+# ===========================================================================
+def _get_pro_codes() -> set:
+    """有効なPROアクセスコード集合を返す。
+
+    secrets に PRO_CODE（文字列）または PRO_CODES（カンマ区切り/リスト）が
+    設定されていればそれを使う。未設定ならローカル開発用の既定コードを使う。
+    """
+    codes: set = set()
+    try:
+        single = st.secrets.get("PRO_CODE")
+        if single:
+            codes.add(str(single).strip())
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+    try:
+        multi = st.secrets.get("PRO_CODES")
+        if multi:
+            if isinstance(multi, str):
+                codes.update(c.strip() for c in multi.split(",") if c.strip())
+            else:  # list/tuple
+                codes.update(str(c).strip() for c in multi)
+    except (KeyError, FileNotFoundError, AttributeError):
+        pass
+    # secrets未設定時のローカル開発用フォールバック（本番では必ずsecretsを設定）
+    if not codes:
+        codes.add("DEMO-PRO")
+    return codes
+
+
+# フリーミアムのマスタースイッチ。False=全機能を無料公開（集客フック）。
+# 決済・導線が整う将来フェーズで True にするとPROロック（sim/PDF/インデックス）が有効化される。
+FREEMIUM_ENABLED = False
+
+
+def _render_pro_gate() -> bool:
+    """サイドバーにPROゲートを描画し、PRO解放状態を返す。
+    FREEMIUM_ENABLED=False のときはゲートを出さず全機能を無料解放する。"""
+    if not FREEMIUM_ENABLED:
+        return True
+    if "is_pro" not in st.session_state:
+        st.session_state.is_pro = False
+
+    with st.sidebar:
+        st.markdown("### 🔓 アクセスティア")
+        if st.session_state.is_pro:
+            st.success("PRO 機能が有効です")
+            st.caption("シミュレーター・インデックス・PDF出力が利用できます。")
+            if st.button("ログアウト（無料に戻す）", use_container_width=True):
+                st.session_state.is_pro = False
+                st.rerun()
+        else:
+            st.info("現在 **無料プラン**（ベーシックストラテジー表のみ）")
+            code = st.text_input(
+                "PROアクセスコード", type="password",
+                placeholder="購入時に発行されたコードを入力",
+                help="シミュレーター・インデックスプレイ・PDF出力を解放します。")
+            if st.button("PROを有効化", use_container_width=True, type="primary"):
+                if code.strip() in _get_pro_codes():
+                    st.session_state.is_pro = True
+                    st.rerun()
+                else:
+                    st.error("コードが正しくありません。")
+            # TODO: 決済導線（Stripe/Gumroad）の購入リンクをここに設置する
+            st.caption("PRO版で差別化機能（シミュレーション・破産確率・"
+                       "インデックス・PDF）が解放されます。")
+    return st.session_state.is_pro
+
+
+IS_PRO = _render_pro_gate()
+
+
+def _pro_locked_notice(feature_name: str):
+    """PRO限定機能のロック表示。無料ユーザーに解放方法を案内する。"""
+    st.warning(f"🔒 **{feature_name}** は PRO 機能です。")
+    st.markdown(
+        "この機能を使うには、サイドバーの **「PROアクセスコード」** に"
+        "購入時のコードを入力して有効化してください。\n\n"
+        "- **無料プラン**：ベーシックストラテジー表（ハウスルール対応）\n"
+        "- **PRO プラン**：＋シミュレーター・破産確率・インデックスプレイ・PDF出力")
+    # TODO: 決済（Stripe/Gumroad）の購入ボタン/リンクをここに設置する
+
+
 def _up_label(u):
     return "A" if u == 11 else str(u)
 
@@ -244,45 +340,110 @@ with col_suit:
 # ===========================================================================
 # ハウスルール入力
 # ===========================================================================
+# ── ルールセット（プリセット）定義 ────────────────────────────────
+# 名前 → 各ウィジェット(key)に流し込む値。新しい店舗ルールはここに追加するだけ。
+RULESET_PRESETS = {
+    "BLOW川崎": {
+        "hr_num_decks": 6,
+        "hr_bj_pay": "3:2 (1.5倍)",
+        "hr_soft17": "S17 (スタンド)",
+        "hr_hole_card": "ENHC — 欧州式（ノーホールカード）",
+        "hr_double": "any（どの2枚でも）",
+        "hr_das": True,
+        "hr_split_aces": True,
+        "hr_draw_split_aces": False,
+        "hr_max_splits": 9,
+        "hr_surrender": "early（アーリーサレンダー）",
+        "hr_surrender_vs_ace": False,
+        "hr_decks_dealt": 4.5,   # 6デッキ中4.5配布＝ペネトレーション75%
+    },
+}
+_RULESET_OPTIONS = ["カスタム（手動設定）"] + list(RULESET_PRESETS.keys())
+
+# 各ウィジェットの初期値（カスタム時の既定）。session_state未設定なら入れる。
+_HR_DEFAULTS = {
+    "hr_num_decks": 6,
+    "hr_bj_pay": "3:2 (1.5倍)",
+    "hr_soft17": "S17 (スタンド)",
+    "hr_hole_card": "HC — US式（事前確認あり）",
+    "hr_double": "any（どの2枚でも）",
+    "hr_das": True,
+    "hr_split_aces": True,
+    "hr_draw_split_aces": False,
+    "hr_max_splits": 3,
+    "hr_surrender": "late（レイトサレンダー）",
+    "hr_surrender_vs_ace": False,
+    "hr_decks_dealt": None,   # None=デッキ数から75%で自動算出
+}
+for _k, _v in _HR_DEFAULTS.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+
+def _apply_ruleset():
+    """ルールセット選択時、プリセット値を各ウィジェットのsession_stateへ反映する。"""
+    preset = RULESET_PRESETS.get(st.session_state.get("hr_ruleset"))
+    if preset:
+        for _key, _val in preset.items():
+            st.session_state[_key] = _val
+
+
 with st.expander("⚙️  ハウスルール設定（クリックで展開）", expanded=False):
+    st.radio(
+        "ルールセット（プリセット）",
+        _RULESET_OPTIONS,
+        key="hr_ruleset",
+        on_change=_apply_ruleset,
+        horizontal=True,
+    )
+    st.caption("プリセットを選ぶと、下のハウスルールが自動入力されます"
+               "（選択後に手動で微調整も可能）。")
     rc1, rc2, rc3 = st.columns(3)
     with rc1:
         st.markdown("**テーブル基本ルール**")
-        num_decks = st.selectbox("デッキ数", [1, 2, 4, 6, 8], index=3)
-        bj_pay_label = st.selectbox("BJ 配当", ["3:2 (1.5倍)", "6:5 (1.2倍)"])
+        num_decks = st.selectbox("デッキ数", [1, 2, 4, 6, 8], key="hr_num_decks")
+        bj_pay_label = st.selectbox(
+            "BJ 配当", ["3:2 (1.5倍)", "6:5 (1.2倍)"], key="hr_bj_pay")
         soft17_label = st.selectbox(
-            "ディーラー ソフト17", ["S17 (スタンド)", "H17 (ヒット)"])
+            "ディーラー ソフト17", ["S17 (スタンド)", "H17 (ヒット)"], key="hr_soft17")
         hole_card_label = st.selectbox(
             "ホールカードルール",
             ["HC — US式（事前確認あり）",
              "ANHC — オーストラリア式（ノーホールカード）",
-             "ENHC — 欧州式（ノーホールカード）"])
+             "ENHC — 欧州式（ノーホールカード）"],
+            key="hr_hole_card")
     with rc2:
         st.markdown("**ダブル・スプリット**")
         double_label = st.selectbox(
             "ダブルダウン条件",
-            ["any（どの2枚でも）", "9-11", "10-11"])
-        das = st.checkbox("スプリット後ダブル可 (DAS)", value=True)
-        split_aces = st.checkbox("エースのスプリット可", value=True)
-        draw_to_split_aces = st.checkbox("スプリットA後のヒット可", value=False)
-        max_splits = st.number_input("最大スプリット追加回数", 1, 9, 3, 1)
+            ["any（どの2枚でも）", "9-11", "10-11"], key="hr_double")
+        das = st.checkbox("スプリット後ダブル可 (DAS)", key="hr_das")
+        split_aces = st.checkbox("エースのスプリット可", key="hr_split_aces")
+        draw_to_split_aces = st.checkbox("スプリットA後のヒット可", key="hr_draw_split_aces")
+        max_splits = st.number_input(
+            "最大スプリット追加回数", min_value=1, max_value=9, step=1, key="hr_max_splits")
     with rc3:
         st.markdown("**サレンダー・ペネトレーション**")
         surrender_label = st.selectbox(
             "サレンダー",
-            ["late（レイトサレンダー）", "none（なし）", "early（アーリーサレンダー）"])
-        surrender_vs_ace_ui = st.checkbox("エース対面でのサレンダー可", value=False)
+            ["late（レイトサレンダー）", "none（なし）", "early（アーリーサレンダー）"],
+            key="hr_surrender")
+        surrender_vs_ace_ui = st.checkbox(
+            "エース対面でのサレンダー可", key="hr_surrender_vs_ace")
         _pen_min = float(max(1, num_decks // 2))
         _pen_max = max(_pen_min, float(num_decks - 1))
-        _pen_default_raw = num_decks * 0.75
-        # 0.5刻みに丸めてスライダー範囲内に収める
-        _pen_default = min(max(_pen_min, round(_pen_default_raw * 2) / 2), _pen_max)
+        # decks_dealt は num_decks に依存。session_state値を範囲にクランプしてから使う
+        _dd = st.session_state.get("hr_decks_dealt")
+        if _dd is None:
+            _dd = num_decks * 0.75
+        _dd = min(max(_pen_min, round(_dd * 2) / 2), _pen_max)
+        st.session_state["hr_decks_dealt"] = _dd   # スライダー生成前なので変更OK
         decks_dealt = st.slider(
             "シューから何デッキ配布でシャッフルするか（シミュ用）",
             min_value=_pen_min,
             max_value=_pen_max,
-            value=_pen_default,
             step=0.5,
+            key="hr_decks_dealt",
         )
         penetration = decks_dealt / num_decks
         st.caption(
@@ -558,6 +719,49 @@ with tab1:
             "選択したTCに応じて残りデッキの構成比率を近似調整して計算しています"
             "（TCを変えるとEV値も変化します）。TCインデックス発動セルは変更後アクションのEVを表示します。")
 
+    # -----------------------------------------------------------------------
+    # 勝率・引き分け率・負け率の内訳（#113「17は強いのか？」由来の機能）
+    # 任意のプレイヤー最終手 × ディーラーアップカードでスタンドした場合の
+    # win/push/lose を解析的に算出して表示する（EVだけでなく分布を可視化）。
+    # -----------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("##### 🎯 勝敗内訳（スタンド時の win / push / lose）")
+    st.caption(
+        "「この手でスタンドしたら実際に何%勝てるのか」を、ディーラー最終手分布から"
+        "解析的に計算します。例：プレイヤー17 vs ディーラー7 は本当に強いのか？")
+
+    wcol1, wcol2 = st.columns(2)
+    with wcol1:
+        wl_player = st.slider(
+            "プレイヤーの最終手（ハード合計）", min_value=12, max_value=21, value=17,
+            help="スタンドした時点のプレイヤー合計。ソフトハンドも、Aを11として"
+                 "実効合計が同じなら勝敗内訳は同一です（スタンド時の比較相手は同じため）。")
+    with wcol2:
+        wl_up = st.selectbox(
+            "ディーラーのアップカード", UPCARDS,
+            index=UPCARDS.index(7), format_func=_up_label)
+
+    bd = stand_breakdown(wl_player, wl_up, rules, tc=tab1_tc)
+    bw, bp, bl = st.columns(3)
+    bw.metric("勝率 (Win)", f"{bd['win'] * 100:.1f}%")
+    bp.metric("引き分け (Push)", f"{bd['push'] * 100:.1f}%")
+    bl.metric("負け率 (Lose)", f"{bd['lose'] * 100:.1f}%")
+    st.caption(
+        f"スタンドEV（= 勝率 − 負け率）: **{bd['ev']:+.4f}**　"
+        f"／ ディーラーアップカード {_up_label(wl_up)}・TC {tab1_tc:+d}・"
+        f"{rules.short_description()} 条件。"
+        "（ディーラーがBJを確認するルールでは、ディーラーBJ非確定の条件付き分布です）")
+
+    # 参考: ディーラー最終手分布の内訳も併記
+    dlr = bd["dealer"]
+    dlr_df = pd.DataFrame(
+        [("17", dlr[17]), ("18", dlr[18]), ("19", dlr[19]),
+         ("20", dlr[20]), ("21", dlr[21]), ("バスト", dlr["bust"])],
+        columns=["ディーラー最終手", "確率"])
+    dlr_df["確率"] = (dlr_df["確率"] * 100).map(lambda x: f"{x:.1f}%")
+    with st.expander("ディーラー最終手の確率分布（参考）"):
+        st.dataframe(dlr_df, use_container_width=True, hide_index=True)
+
 # ---------------------------------------------------------------------------
 # Tab 2: インデックスプレイ
 # ---------------------------------------------------------------------------
@@ -568,46 +772,53 @@ def _thr_label(thr, direction):
 
 with tab2:
     st.subheader("True Count 別インデックスプレイ（Hi-Lo）")
-    tc2 = st.slider("True Count (TC)", -5, 5, 0, 1)
-
-    ins_thr = get_insurance_threshold()
-    if should_take_insurance(tc2):
-        st.success(f"TC {tc2:+d} → インシュランスを取る（TC ≥ {ins_thr:+d}）")
+    if not IS_PRO:
+        _pro_locked_notice("インデックスプレイ")
     else:
-        st.info(f"TC {tc2:+d} → インシュランスは取らない（TC ≥ {ins_thr:+d} で得）")
+        tc2 = st.slider("True Count (TC)", -5, 5, 0, 1)
 
-    active = get_active_indexes(tc2, rules)
-    st.markdown(f"**TC {tc2:+d} でベーシックストラテジーから逸脱中のプレイ**")
-    if active:
-        df = pd.DataFrame(
+        ins_thr = get_insurance_threshold()
+        if should_take_insurance(tc2):
+            st.success(f"TC {tc2:+d} → インシュランスを取る（TC ≥ {ins_thr:+d}）")
+        else:
+            st.info(f"TC {tc2:+d} → インシュランスは取らない（TC ≥ {ins_thr:+d} で得）")
+
+        active = get_active_indexes(tc2, rules)
+        st.markdown(f"**TC {tc2:+d} でベーシックストラテジーから逸脱中のプレイ**")
+        if active:
+            df = pd.DataFrame(
+                [(h, _up_label(d) if isinstance(d, int) else d, _thr_label(thr, direction), a)
+                 for (h, d, thr, a, direction) in active],
+                columns=["ハンド", "ディーラー", "発動条件", "アクション"])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.write("発動中の逸脱プレイはありません（BS通りにプレイ）。")
+
+        st.markdown("---")
+        st.markdown("**インデックスプレイ全一覧（現在のハウスルールで実際にBSから逸脱するものだけを動的に算出）**")
+        filtered_idx = get_filtered_indexes(rules)
+        all_idx = pd.DataFrame(
             [(h, _up_label(d) if isinstance(d, int) else d, _thr_label(thr, direction), a)
-             for (h, d, thr, a, direction) in active],
+             for (h, d, thr, a, direction) in filtered_idx],
             columns=["ハンド", "ディーラー", "発動条件", "アクション"])
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.write("発動中の逸脱プレイはありません（BS通りにプレイ）。")
-
-    st.markdown("---")
-    st.markdown("**インデックスプレイ全一覧（現在のハウスルールで実際にBSから逸脱するものだけを動的に算出）**")
-    filtered_idx = get_filtered_indexes(rules)
-    all_idx = pd.DataFrame(
-        [(h, _up_label(d) if isinstance(d, int) else d, _thr_label(thr, direction), a)
-         for (h, d, thr, a, direction) in filtered_idx],
-        columns=["ハンド", "ディーラー", "発動条件", "アクション"])
-    st.dataframe(all_idx, use_container_width=True, hide_index=True)
-    n_excluded = len(ILLUSTRIOUS_18) + len(FAB_4) - len(filtered_idx)
-    if n_excluded > 0:
-        st.caption(
-            f"※ 現在のルール（{rules.short_description()}）ではBSから逸脱しない、"
-            f"または他のアクションが常に優先されるため "
-            f"{n_excluded} 件を除外しています。")
+        st.dataframe(all_idx, use_container_width=True, hide_index=True)
+        n_excluded = len(ILLUSTRIOUS_18) + len(FAB_4) - len(filtered_idx)
+        if n_excluded > 0:
+            st.caption(
+                f"※ 現在のルール（{rules.short_description()}）ではBSから逸脱しない、"
+                f"または他のアクションが常に優先されるため "
+                f"{n_excluded} 件を除外しています。")
 
 # ---------------------------------------------------------------------------
 # Tab 3: シミュレーター
 # ---------------------------------------------------------------------------
 with tab3:
     st.subheader("モンテカルロ シミュレーター")
+    if not IS_PRO:
+        _pro_locked_notice("シミュレーター")
 
+if IS_PRO:
+  with tab3:
     col1, col2 = st.columns(2)
     with col1:
         num_hands = st.select_slider(
@@ -744,6 +955,11 @@ with tab3:
 # ---------------------------------------------------------------------------
 with tab4:
     st.subheader("PDF 出力")
+    if not IS_PRO:
+        _pro_locked_notice("PDF 出力")
+
+if IS_PRO:
+  with tab4:
     pcol1, pcol2, pcol3 = st.columns(3)
     with pcol1:
         paper = st.selectbox("用紙サイズ", ["A5", "A4", "Letter"])
