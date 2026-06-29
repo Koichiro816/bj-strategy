@@ -394,10 +394,22 @@ for _k, _v in _HR_DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
+# ユーザーが自分で保存したカスタムプリセット（このセッション中のみ保持）
+if "user_presets" not in st.session_state:
+    st.session_state["user_presets"] = {}
+
+# プリセット保存時に集めるハウスルールのキー一覧
+_HR_KEYS = list(_HR_DEFAULTS.keys())
+
 
 def _apply_ruleset():
-    """ルールセット選択時、プリセット値を各ウィジェットのsession_stateへ反映する。"""
-    preset = RULESET_PRESETS.get(st.session_state.get("hr_ruleset"))
+    """ルールセット選択時、プリセット値を各ウィジェットのsession_stateへ反映する。
+
+    既定プリセット(RULESET_PRESETS)とユーザー保存プリセット(user_presets)の両方を探す。
+    """
+    name = st.session_state.get("hr_ruleset")
+    preset = (RULESET_PRESETS.get(name)
+              or st.session_state.get("user_presets", {}).get(name))
     if preset:
         for _key, _val in preset.items():
             st.session_state[_key] = _val
@@ -407,30 +419,13 @@ _GUIDE_IMG_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "assets", "guide")
 
 
-def render_rule_guide():
-    """実際のカジノでハウスルールを確認する方法を、写真つきで説明する。"""
-    with st.expander("📖 ルールの見分け方（カジノで何を見ればいい？・写真つき）",
-                     expanded=False):
-        st.markdown("**遊ぶ卓のルールが分からないとき、現場ではこう確認します。**")
-
-        st.markdown("**① デッキ数 → シュー（カードの箱）を見る**")
-        _shoe = os.path.join(_GUIDE_IMG_DIR, "dealing_shoe.jpg")
-        if os.path.exists(_shoe):
-            st.image(_shoe, width=300, caption="シュー：カードを入れて配る箱")
-        st.caption("箱に入っているカードの組数がデッキ数です（1〜8組が一般的）。"
-                   "見て分からなければ、ディーラーに「何デッキですか？」と聞けば教えてくれます。")
-
-        st.markdown("**② 配当・ソフト17 → テーブルの印字（フェルト）を見る**")
-        _felt = os.path.join(_GUIDE_IMG_DIR, "table_felt.jpg")
-        if os.path.exists(_felt):
-            st.image(_felt, width=340, caption="テーブル面に英語でルールが印字されている")
-        st.caption(
-            "テーブルの布面に英語で書かれています。読み方の早見表👇\n\n"
-            "・**BLACKJACK PAYS 3 TO 2** ＝ 配当 3:2（良い卓）／**6 TO 5** ＝ 不利な 6:5 卓\n"
-            "・**Dealer must … stand on all 17s**（17で必ず止まる）＝ S17（プレイヤー有利）\n"
-            "・**Dealer hits soft 17** / **H17** ＝ ソフト17ヒット（やや不利）\n"
-            "・**INSURANCE PAYS 2 TO 1** ＝ インシュランスの配当表示（どの卓にもよくある）")
-        st.caption("※ 写真は実際のカジノテーブルの一例です。")
+def _img_popover(label, filename, caption):
+    """ルール設定の隣に置く「📷 見分け方」ポップオーバー（押すと写真が出る）。"""
+    with st.popover(label, use_container_width=True):
+        _p = os.path.join(_GUIDE_IMG_DIR, filename)
+        if os.path.exists(_p):
+            st.image(_p, use_container_width=True)
+        st.caption(caption)
 
 
 # ─── 使い方ステップ（最上部・初心者導線） ───
@@ -449,15 +444,19 @@ st.markdown(
     unsafe_allow_html=True)
 
 with st.expander("⚙️  ハウスルール設定（クリックで展開）", expanded=False):
+    if st.session_state.pop("_preset_saved_flag", None):
+        st.success("プリセットを保存しました。上の一覧から選べます。")
+    _ruleset_options = (["カスタム（手動設定）"] + list(RULESET_PRESETS.keys())
+                        + list(st.session_state["user_presets"].keys()))
     st.radio(
         "ルールセット（プリセット）",
-        _RULESET_OPTIONS,
+        _ruleset_options,
         key="hr_ruleset",
         on_change=_apply_ruleset,
         horizontal=True,
     )
     st.caption("プリセットを選ぶと、下のハウスルールが自動入力されます"
-               "（選択後に手動で微調整も可能）。")
+               "（選択後に手動で微調整も可能）。自分用の設定は一番下で名前を付けて保存できます。")
     rc1, rc2, rc3 = st.columns(3)
     with rc1:
         st.markdown("**テーブル基本ルール**")
@@ -465,6 +464,10 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
             "デッキ数", [1, 2, 4, 6, 8], key="hr_num_decks",
             help="使用するトランプの組数。少ないほどプレイヤー有利（1〜2デッキは好条件）。"
                  "／確認方法：シューの中のカードの組数。分からなければディーラーに聞く。")
+        _img_popover(
+            "📷 デッキ数の見分け方（シューを見る）", "shoe_fal.png",
+            "シュー（カードを入れて配る箱）の中のカードの組数がデッキ数です（1〜8組）。"
+            "見て分からなければ、ディーラーに「何デッキ？」と聞けばOKです。")
         bj_pay_label = st.selectbox(
             "BJ 配当", ["3:2 (1.5倍)", "6:5 (1.2倍)"], key="hr_bj_pay",
             help="ブラックジャック成立時の配当。3:2が正規。6:5は還元率が約1.4%下がる不利な卓で、避けたい条件です。"
@@ -474,6 +477,11 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
             help="エースを含む17（ソフト17）でディーラーがどう動くか。S17（スタンド）がプレイヤー有利、"
                  "H17（ヒット）はカジノ側が約0.2%有利になります。"
                  "／確認方法：テーブル面の『stand on all 17s』『hits soft 17』表記。")
+        _img_popover(
+            "📷 配当・ソフト17の見分け方（テーブルを見る）", "table_felt_annotated.png",
+            "テーブル面の印字で分かります。図の「ここを見る」を参照："
+            "『PAYS 3 TO 2』＝配当3:2（良卓）／『6 TO 5』＝不利。"
+            "『stand on all 17s』＝S17（有利）／『hits soft 17』＝H17。")
         hole_card_label = st.selectbox(
             "ホールカードルール",
             ["HC — US式（事前確認あり）",
@@ -539,7 +547,39 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
                 f"→ {num_decks}デッキ中 {decks_dealt:g}デッキ配布してシャッフル"
                 f"（ペネトレーション {penetration:.0%}）")
 
-render_rule_guide()
+    # ── 自分用プリセット／削除 ──
+    st.markdown("---")
+    st.markdown("**💾 自分用プリセットを保存／呼び出し**")
+    st.caption("いま選んでいるルールに名前を付けて保存できます。"
+               "次回から上の一覧でワンタップ呼び出し。"
+               "※ 保存はこのセッション中のみ有効です（ページを閉じると消えます）。")
+    _save_name = st.text_input(
+        "プリセット名", key="hr_preset_name", placeholder="例：六本木○○カジノ")
+    _ps1, _ps2 = st.columns(2)
+    with _ps1:
+        if st.button("現在の設定を保存", use_container_width=True):
+            _nm = (_save_name or "").strip()
+            if not _nm:
+                st.warning("プリセット名を入力してください。")
+            elif _nm in RULESET_PRESETS or _nm == "カスタム（手動設定）":
+                st.warning("その名前は既定プリセットと重複します。別の名前にしてください。")
+            else:
+                st.session_state["user_presets"][_nm] = {
+                    _key: st.session_state[_key] for _key in _HR_KEYS}
+                st.session_state["_preset_saved_flag"] = True
+                st.rerun()
+    with _ps2:
+        _user_names = list(st.session_state["user_presets"].keys())
+        if _user_names:
+            _del = st.selectbox(
+                "保存済みを削除", ["（選択）"] + _user_names, key="hr_preset_del")
+            if st.button("選択を削除", use_container_width=True) and _del in _user_names:
+                del st.session_state["user_presets"][_del]
+                if st.session_state.get("hr_ruleset") == _del:
+                    st.session_state["hr_ruleset"] = "カスタム（手動設定）"
+                st.rerun()
+        else:
+            st.caption("（まだ保存したプリセットはありません）")
 
 blackjack_pays = 1.5 if bj_pay_label.startswith("3:2") else 1.2
 soft17 = "S17" if soft17_label.startswith("S17") else "H17"
