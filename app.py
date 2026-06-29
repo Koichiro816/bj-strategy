@@ -892,64 +892,15 @@ def render_quick_decision(rules, tc):
 # ===========================================================================
 # タブ
 # ===========================================================================
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 ベーシックストラテジー",
-    "🎯 インデックスプレイ",
-    "🔢 シミュレーター",
-    "📄 PDF 出力",
-    "📚 ルール＆用語集"])
-
-# ---------------------------------------------------------------------------
-# Tab 1: ベーシックストラテジー
-# ---------------------------------------------------------------------------
-with tab1:
-    st.subheader("ベーシックストラテジー")
-    st.markdown(
-        '<div style="background:#EEF2FF;border:1px solid #C5CAE9;border-radius:8px;'
-        'padding:10px 14px;margin-bottom:10px;font-size:0.85rem;color:#37474F;'
-        'line-height:1.65;">'
-        '<strong>🔰 3秒でわかる使い方</strong>　'
-        '① 上の「⚙️ ハウスルール設定」で遊ぶ卓の条件を選ぶ　→　'
-        '② すぐ下の<strong>⚡クイック判定</strong>で「自分の2枚」と「ディーラー」を選ぶと'
-        '最善手が出ます。迷ったら、まずここだけでOK。'
-        'じっくり派は下の早見表をどうぞ。</div>',
-        unsafe_allow_html=True)
-
-    tc1_col, tc2_col = st.columns([3, 1])
-    with tc1_col:
-        tab1_tc = st.select_slider(
-            "True Count (TC)",
-            options=list(range(-5, 6)),
-            value=0,
-            format_func=lambda x: f"TC {x:+d}",
-        )
-    with tc2_col:
-        show_ev = st.checkbox("EV表示", value=False,
-                              help="各マスに最善アクションのEV（期待値）を表示します。")
-
-    if tab1_tc == 0:
-        display_table = strategy_table
-        changed_cells: set = set()
-    else:
-        display_table, changed_cells = apply_tc_overlay(strategy_table, tab1_tc, rules)
-
-    ev_table = generate_ev_table(display_table, rules, tc=tab1_tc) if show_ev else None
-
-    if should_take_insurance(tab1_tc):
-        st.success(f"TC {tab1_tc:+d} → インシュランスを取る（TC ≥ +3）")
-
-    render_quick_decision(rules, tab1_tc)
-
-    st.caption("▼ 以下は全パターンの早見表です（じっくり確認したい方向け）")
+def render_bs_tables(display_table, ev_table, changed_cells, tab1_tc, show_ev, rules):
+    """ベーシックストラテジー早見表（ハード/ソフト/ペアの3表）を描画する。"""
     st.markdown(legend_html(show_tc=bool(changed_cells)), unsafe_allow_html=True)
     if changed_cells:
         st.caption(
             f"★ {len(changed_cells)} セルが TC {tab1_tc:+d} のインデックスプレイで変更されています。")
-
     hard_totals = list(range(17, 4, -1))
     soft_totals = list(range(20, 12, -1))
-    pair_ranks  = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
-
+    pair_ranks = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
     st.markdown(
         _table_card(
             "ハードハンド ( Hard Totals )",
@@ -959,7 +910,6 @@ with tab1:
                 table_type="hard", changed=changed_cells,
                 ev_dict=ev_table["hard"] if ev_table else None)),
         unsafe_allow_html=True)
-
     st.markdown(
         _table_card(
             "ソフトハンド ( Soft Totals )",
@@ -969,7 +919,6 @@ with tab1:
                 table_type="soft", changed=changed_cells,
                 ev_dict=ev_table["soft"] if ev_table else None)),
         unsafe_allow_html=True)
-
     st.markdown(
         _table_card(
             "ペア ( Pairs )",
@@ -979,7 +928,6 @@ with tab1:
                 table_type="pair", changed=changed_cells,
                 ev_dict=ev_table["pair"] if ev_table else None)),
         unsafe_allow_html=True)
-
     st.caption(
         "無限デッキ近似による解析的BS。6D 標準BSとの既知差異は補正済み。"
         " ENHC/ANHC 選択時はノーホールカードルールが自動反映されます。")
@@ -989,17 +937,13 @@ with tab1:
             "選択したTCに応じて残りデッキの構成比率を近似調整して計算しています"
             "（TCを変えるとEV値も変化します）。TCインデックス発動セルは変更後アクションのEVを表示します。")
 
-    # -----------------------------------------------------------------------
-    # 勝率・引き分け率・負け率の内訳（#113「17は強いのか？」由来の機能）
-    # 任意のプレイヤー最終手 × ディーラーアップカードでスタンドした場合の
-    # win/push/lose を解析的に算出して表示する（EVだけでなく分布を可視化）。
-    # -----------------------------------------------------------------------
-    st.markdown("---")
+
+def render_stand_breakdown_section(rules, tab1_tc):
+    """スタンド時の勝率・引き分け・負け率の内訳セクションを描画する。"""
     st.markdown("##### 🎯 勝敗内訳（スタンド時の win / push / lose）")
     st.caption(
         "「この手でスタンドしたら実際に何%勝てるのか」を、ディーラー最終手分布から"
         "解析的に計算します。例：プレイヤー17 vs ディーラー7 は本当に強いのか？")
-
     wcol1, wcol2 = st.columns(2)
     with wcol1:
         wl_player = st.slider(
@@ -1010,7 +954,6 @@ with tab1:
         wl_up = st.selectbox(
             "ディーラーのアップカード", UPCARDS,
             index=UPCARDS.index(7), format_func=_up_label)
-
     bd = stand_breakdown(wl_player, wl_up, rules, tc=tab1_tc)
     bw, bp, bl = st.columns(3)
     bw.metric("勝率 (Win)", f"{bd['win'] * 100:.1f}%")
@@ -1026,8 +969,6 @@ with tab1:
             "「ディーラーが最初からブラックジャックではなかった場合」の数字です。"
             "（もしディーラーがブラックジャックなら、その時点で勝負が決まり、"
             "あなたがプレイする場面にならないためです。）")
-
-    # 参考: ディーラー最終手分布の内訳も併記
     dlr = bd["dealer"]
     dlr_df = pd.DataFrame(
         [("17", dlr[17]), ("18", dlr[18]), ("19", dlr[19]),
@@ -1036,6 +977,50 @@ with tab1:
     dlr_df["確率"] = (dlr_df["確率"] * 100).map(lambda x: f"{x:.1f}%")
     with st.expander("ディーラー最終手の確率分布（参考）"):
         st.dataframe(dlr_df, use_container_width=True, hide_index=True)
+
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 ベーシックストラテジー",
+    "🎯 インデックスプレイ",
+    "🔢 シミュレーター",
+    "📄 PDF 出力",
+    "📚 ルール＆用語集"])
+
+# ---------------------------------------------------------------------------
+# Tab 1: ベーシックストラテジー
+# ---------------------------------------------------------------------------
+with tab1:
+    st.subheader("ベーシックストラテジー")
+    with st.expander("🎓 上級者向け設定（True Count・EV表示）", expanded=False):
+        tc1_col, tc2_col = st.columns([3, 1])
+        with tc1_col:
+            tab1_tc = st.select_slider(
+                "True Count (TC)",
+                options=list(range(-5, 6)),
+                value=0,
+                format_func=lambda x: f"TC {x:+d}",
+            )
+        with tc2_col:
+            show_ev = st.checkbox("EV表示", value=False,
+                                  help="各マスに最善アクションのEV（期待値）を表示します。")
+
+    if tab1_tc == 0:
+        display_table = strategy_table
+        changed_cells: set = set()
+    else:
+        display_table, changed_cells = apply_tc_overlay(strategy_table, tab1_tc, rules)
+    ev_table = generate_ev_table(display_table, rules, tc=tab1_tc) if show_ev else None
+
+    _sub_q, _sub_t, _sub_b = st.tabs(
+        ["⚡ クイック判定", "📊 早見表（全パターン）", "🎯 勝敗内訳"])
+    with _sub_q:
+        if should_take_insurance(tab1_tc):
+            st.success(f"TC {tab1_tc:+d} → インシュランスを取る（TC ≥ +3）")
+        render_quick_decision(rules, tab1_tc)
+    with _sub_t:
+        render_bs_tables(display_table, ev_table, changed_cells, tab1_tc, show_ev, rules)
+    with _sub_b:
+        render_stand_breakdown_section(rules, tab1_tc)
 
 # ---------------------------------------------------------------------------
 # Tab 2: インデックスプレイ
