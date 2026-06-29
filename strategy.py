@@ -447,6 +447,37 @@ def generate_ev_table(table: dict, rules: HouseRules, tc: float = 0) -> dict:
     return ev_table
 
 
+def evaluate_hand(player_total: int, soft: bool, is_pair: bool,
+                  dealer_upcard: int, rules: HouseRules, pair_rank: int = 0,
+                  tc: float = 0):
+    """単手（プレイヤー2枚 × ディーラーアップカード）の各アクションEVと最善手を返す。
+
+    クイック判定（単手ルックアップ）UI用。best_action と同一の候補集合を用い、
+    各アクションのEVも返すことで「なぜその手が最善か」を提示できる。
+    返り値: (best_action: str, evs: dict[str, float])
+      evs のキーは該当する範囲で "S"/"H"/"D"/"P"/"R"。
+    """
+    h17 = rules.soft17 == "H17"
+    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks, tc)
+    dealer_probs = {
+        17: dprobs[0], 18: dprobs[1], 19: dprobs[2],
+        20: dprobs[3], 21: dprobs[4], "bust": dprobs[5],
+    }
+    can_split = is_pair and (pair_rank != 11 or rules.split_aces)
+    evs = {
+        "S": ev_stand(player_total, dealer_probs),
+        "H": ev_hit(player_total, soft, dealer_upcard, rules, tc),
+    }
+    if rules.can_double_total(player_total):
+        evs["D"] = ev_double(player_total, soft, dealer_upcard, rules, tc)
+    if is_pair and can_split:
+        evs["P"] = ev_split(pair_rank, dealer_upcard, rules, tc)
+    if rules.surrender != "none" and (dealer_upcard != 11 or rules.surrender_vs_ace):
+        evs["R"] = ev_surrender()
+    best = max(evs, key=evs.get)
+    return best, evs
+
+
 # ---------------------------------------------------------------------------
 # BSテーブル生成
 # ---------------------------------------------------------------------------
@@ -526,6 +557,144 @@ def generate_strategy_table(rules: HouseRules, tc: float = 0) -> dict:
             table["soft"][(13, 5)] = "D"
 
     return table
+
+
+# ---------------------------------------------------------------------------
+# ハウスエッジ（総合EV）の解析的算出
+# ---------------------------------------------------------------------------
+
+def _best_ev(player_total: int, soft: bool, is_pair: bool, dealer_upcard: int,
+             can_double: bool, can_split: bool, can_surrender: bool,
+             rules: HouseRules, pair_rank: int = 0, tc: float = 0) -> float:
+    """best_action と同一の候補集合における最大EVを返す（＝最適プレイのEV）。
+
+    ピーク（US式）ルールでは、ディーラーBJが否定された条件付きEVを返す
+    （_dealer_from_upcard が peek 時に条件付き分布を返すため）。
+    """
+    h17 = rules.soft17 == "H17"
+    dprobs = _dealer_from_upcard(dealer_upcard, h17, rules.dealer_peeks, tc)
+    dealer_probs = {
+        17: dprobs[0], 18: dprobs[1], 19: dprobs[2],
+        20: dprobs[3], 21: dprobs[4], "bust": dprobs[5],
+    }
+    cands = [
+        ev_stand(player_total, dealer_probs),
+        ev_hit(player_total, soft, dealer_upcard, rules, tc),
+    ]
+    if can_double and rules.can_double_total(player_total):
+        cands.append(ev_double(player_total, soft, dealer_upcard, rules, tc))
+    if is_pair and can_split:
+        cands.append(ev_split(pair_rank, dealer_upcard, rules, tc))
+    if (can_surrender and rules.surrender != "none"
+            and (dealer_upcard != 11 or rules.surrender_vs_ace)):
+        cands.append(ev_surrender())
+    return max(cands)
+
+
+@lru_cache(maxsize=None)
+def _house_edge_cached(rules_key: tuple, tc: float) -> float:
+    rules = HouseRules(**dict(rules_key))
+    total_ev = 0.0
+    for c1 in CARD_RANKS:
+        p1 = card_prob_tc(c1, tc)
+        t1, s1 = (11, True) if c1 == 11 else (c1, False)
+        for c2 in CARD_RANKS:
+            w = p1 * card_prob_tc(c2, tc)
+            total, soft = add_card(t1, s1, c2)
+            is_pair = (c1 == c2)
+            pair_rank = c1 if is_pair else 0
+            player_bj = ((c1 == 11 and c2 == 10) or (c1 == 10 and c2 == 11))
+            can_split = is_pair and (c1 != 11 or rules.split_aces)
+            for up in CARD_RANKS:
+                pu = card_prob_tc(up, tc)
+                p_dbj = dealer_bj_prob(up, tc)
+                if player_bj:
+                    # プレイヤーBJ: ディーラーもBJならプッシュ(0)、他は配当を得る
+                    hand_ev = (1.0 - p_dbj) * rules.blackjack_pays
+                else:
+                    cond = _best_ev(
+                        total, soft, is_pair, up,
+                        can_double=True, can_split=can_split,
+                        can_surrender=True, rules=rules,
+                        pair_rank=pair_rank, tc=tc)
+                    if rules.dealer_peeks:
+                        # ピーク: cond はディーラーBJ非確定の条件付きEV。
+                        # ディーラーBJ時は最初の1単位を失う（ダブル/スプリット前に決着）。
+                        hand_ev = p_dbj * (-1.0) + (1.0 - p_dbj) * cond
+                    else:
+                        # ノーピーク(ENHC): ディーラー分布にBJを内包する近似。
+                        hand_ev = cond
+                total_ev += w * pu * hand_ev
+    return -100.0 * total_ev
+
+
+def house_edge(rules: HouseRules, tc: float = 0) -> float:
+    """最適BSプレイ時のハウスエッジ(%)を解析的に算出する。
+
+    初期2枚手（プレイヤー2枚×ディーラーアップカード1枚）の全組合せを
+    出現確率で重み付けし、プレイヤーBJ配当・ディーラーBJ（ピーク条件）を
+    補正した無条件の総合EVから求める。
+    返り値はハウスエッジ%（= -100 × プレイヤー総合EV）。正ほどカジノ有利。
+    無限デッキ近似のため有限デッキ実測とは±0.05%程度の差が出うる。
+    """
+    return _house_edge_cached(tuple(sorted(vars(rules).items())), tc)
+
+
+# ---------------------------------------------------------------------------
+# Wizard of Odds 公表値ベースの加法モデル（表示用・推奨）
+# 出典/検証: knowledge/wizard_house_edge_rule_effects.md（BJエキスパート考証PASS）
+# 自作EVエンジン(house_edge)は無限デッキ近似でデッキ非感応かつWizardより
+# 約0.1〜0.15%高いため、ユーザーの答え合わせ先であるWizard公表値で統一する。
+# ---------------------------------------------------------------------------
+
+# 基準値(H17・3:2・DOA・DAS・リスプリット可・no-surrender・ピーク・CSM)
+# 出典: https://wizardofodds.com/games/blackjack/why-number-of-decks-matter/
+_WIZ_BASE_HE = {1: 0.014, 2: 0.341, 4: 0.499, 6: 0.551, 8: 0.577}
+
+
+def house_edge_wizard(rules: HouseRules) -> float:
+    """Wizard of Odds公表値ベースの加法モデルでハウスエッジ%を返す（表示用・推奨）。
+
+    基準値(デッキ数, H17ベース) に各ルールの効果量を加算する。
+    符号規約: 戻り値はハウスエッジ%（正＝カジノ有利）。
+    独立近似のため±0.05〜0.1%の誤差。基準は連続シャッフラー(CSM)前提で、
+    カットカード使用卓では実測が約+0.1%高くなる。
+    出典・効果量の検証: knowledge/wizard_house_edge_rule_effects.md
+    """
+    he = _WIZ_BASE_HE.get(
+        rules.num_decks,
+        _WIZ_BASE_HE[min(_WIZ_BASE_HE, key=lambda d: abs(d - rules.num_decks))],
+    )
+    # ソフト17（基準はH17。S17化で差し引き）
+    if rules.soft17 == "S17":
+        he += -0.22
+    # BJ配当（基準3:2。6:5で大幅増）
+    if rules.blackjack_pays == 1.2:
+        he += 1.39
+    # DAS（基準あり。無効化で増）
+    if not rules.double_after_split:
+        he += 0.14
+    # ダブル制限（基準DOA=any）
+    if rules.double_allowed == "9-11":
+        he += 0.09
+    elif rules.double_allowed == "10-11":
+        he += 0.18
+    # サレンダー（基準なし）
+    if rules.surrender == "late":
+        he += -0.07
+    elif rules.surrender == "early":
+        he += -0.39 if rules.surrender_vs_ace else -0.24
+    # スプリットエース関連（基準: A分割可・リスプリット可・A分割後1枚のみ）
+    if not rules.split_aces:
+        he += 0.08
+    if rules.draw_to_split_aces:
+        he += -0.19
+    if rules.max_splits <= 1:
+        he += 0.10
+    # ホールカード（基準ピーク。ENHCで増）
+    if not rules.dealer_peeks:
+        he += 0.11
+    return he
 
 
 if __name__ == "__main__":

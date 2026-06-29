@@ -10,7 +10,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from rules import HouseRules
-from strategy import generate_strategy_table, generate_ev_table, stand_breakdown
+from strategy import (generate_strategy_table, generate_ev_table, stand_breakdown,
+                      house_edge_wizard, evaluate_hand, add_card)
 from index_plays import (ILLUSTRIOUS_18, FAB_4, get_active_indexes,
                          get_filtered_indexes, should_take_insurance,
                          get_insurance_threshold, apply_tc_overlay)
@@ -402,6 +403,51 @@ def _apply_ruleset():
             st.session_state[_key] = _val
 
 
+_GUIDE_IMG_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "assets", "guide")
+
+
+def render_rule_guide():
+    """実際のカジノでハウスルールを確認する方法を、写真つきで説明する。"""
+    with st.expander("📖 ルールの見分け方（カジノで何を見ればいい？・写真つき）",
+                     expanded=False):
+        st.markdown("**遊ぶ卓のルールが分からないとき、現場ではこう確認します。**")
+
+        st.markdown("**① デッキ数 → シュー（カードの箱）を見る**")
+        _shoe = os.path.join(_GUIDE_IMG_DIR, "dealing_shoe.jpg")
+        if os.path.exists(_shoe):
+            st.image(_shoe, width=300, caption="シュー：カードを入れて配る箱")
+        st.caption("箱に入っているカードの組数がデッキ数です（1〜8組が一般的）。"
+                   "見て分からなければ、ディーラーに「何デッキですか？」と聞けば教えてくれます。")
+
+        st.markdown("**② 配当・ソフト17 → テーブルの印字（フェルト）を見る**")
+        _felt = os.path.join(_GUIDE_IMG_DIR, "table_felt.jpg")
+        if os.path.exists(_felt):
+            st.image(_felt, width=340, caption="テーブル面に英語でルールが印字されている")
+        st.caption(
+            "テーブルの布面に英語で書かれています。読み方の早見表👇\n\n"
+            "・**BLACKJACK PAYS 3 TO 2** ＝ 配当 3:2（良い卓）／**6 TO 5** ＝ 不利な 6:5 卓\n"
+            "・**Dealer must … stand on all 17s**（17で必ず止まる）＝ S17（プレイヤー有利）\n"
+            "・**Dealer hits soft 17** / **H17** ＝ ソフト17ヒット（やや不利）\n"
+            "・**INSURANCE PAYS 2 TO 1** ＝ インシュランスの配当表示（どの卓にもよくある）")
+        st.caption("※ 写真は実際のカジノテーブルの一例です。")
+
+
+# ─── 使い方ステップ（最上部・初心者導線） ───
+st.markdown(
+    '<div style="background:#E8F5E9;border:1px solid #A5D6A7;border-radius:10px;'
+    'padding:12px 16px;margin-bottom:12px;font-size:0.9rem;color:#1B3D24;'
+    'line-height:1.7;">'
+    '<div style="font-weight:800;font-size:0.95rem;margin-bottom:4px;">'
+    '📋 使い方は3ステップ</div>'
+    '<strong>Step 1.</strong> 下の「⚙️ ハウスルール設定」で、遊ぶ卓の条件を選ぶ'
+    '（ルールが分からなければ「📖 ルールの見分け方」を参照）<br>'
+    '<strong>Step 2.</strong> 「ベーシックストラテジー」タブの<strong>⚡クイック判定</strong>で、'
+    '自分の2枚とディーラーのカードを選ぶ<br>'
+    '<strong>Step 3.</strong> 表示された<strong>最善手</strong>のとおりにプレイ。'
+    'その卓の<strong>ハウスエッジ（カジノの取り分）</strong>も自動で表示されます。</div>',
+    unsafe_allow_html=True)
+
 with st.expander("⚙️  ハウスルール設定（クリックで展開）", expanded=False):
     st.radio(
         "ルールセット（プリセット）",
@@ -415,35 +461,58 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
     rc1, rc2, rc3 = st.columns(3)
     with rc1:
         st.markdown("**テーブル基本ルール**")
-        num_decks = st.selectbox("デッキ数", [1, 2, 4, 6, 8], key="hr_num_decks")
+        num_decks = st.selectbox(
+            "デッキ数", [1, 2, 4, 6, 8], key="hr_num_decks",
+            help="使用するトランプの組数。少ないほどプレイヤー有利（1〜2デッキは好条件）。"
+                 "／確認方法：シューの中のカードの組数。分からなければディーラーに聞く。")
         bj_pay_label = st.selectbox(
-            "BJ 配当", ["3:2 (1.5倍)", "6:5 (1.2倍)"], key="hr_bj_pay")
+            "BJ 配当", ["3:2 (1.5倍)", "6:5 (1.2倍)"], key="hr_bj_pay",
+            help="ブラックジャック成立時の配当。3:2が正規。6:5は還元率が約1.4%下がる不利な卓で、避けたい条件です。"
+                 "／確認方法：テーブル面の『PAYS 3 TO 2』『6 TO 5』表記。")
         soft17_label = st.selectbox(
-            "ディーラー ソフト17", ["S17 (スタンド)", "H17 (ヒット)"], key="hr_soft17")
+            "ディーラー ソフト17", ["S17 (スタンド)", "H17 (ヒット)"], key="hr_soft17",
+            help="エースを含む17（ソフト17）でディーラーがどう動くか。S17（スタンド）がプレイヤー有利、"
+                 "H17（ヒット）はカジノ側が約0.2%有利になります。"
+                 "／確認方法：テーブル面の『stand on all 17s』『hits soft 17』表記。")
         hole_card_label = st.selectbox(
             "ホールカードルール",
             ["HC — US式（事前確認あり）",
              "ANHC — オーストラリア式（ノーホールカード）",
              "ENHC — 欧州式（ノーホールカード）"],
-            key="hr_hole_card")
+            key="hr_hole_card",
+            help="ディーラーが伏せ札（ホールカード）を持つか。US式(HC)はBJを事前確認。"
+                 "欧州式(ENHC)は確認せず、ダブル/スプリットで増やした賭け金もディーラーBJで失うため約0.1%不利。")
     with rc2:
         st.markdown("**ダブル・スプリット**")
         double_label = st.selectbox(
             "ダブルダウン条件",
-            ["any（どの2枚でも）", "9-11", "10-11"], key="hr_double")
-        das = st.checkbox("スプリット後ダブル可 (DAS)", key="hr_das")
-        split_aces = st.checkbox("エースのスプリット可", key="hr_split_aces")
-        draw_to_split_aces = st.checkbox("スプリットA後のヒット可", key="hr_draw_split_aces")
+            ["any（どの2枚でも）", "9-11", "10-11"], key="hr_double",
+            help="ダブルダウン（1枚だけ引いて賭け金を倍にする）が許される手。"
+                 "any（任意の2枚）が最も有利。9-11や10-11は制限が強く不利になります。")
+        das = st.checkbox(
+            "スプリット後ダブル可 (DAS)", key="hr_das",
+            help="DAS＝Double After Split。ペアを分けた後の手でもダブルできるルール。"
+                 "可だとプレイヤー有利（約0.14%）。")
+        split_aces = st.checkbox(
+            "エースのスプリット可", key="hr_split_aces",
+            help="A,A のペアを2つの手に分けられるか。エースの分割は非常に強力です。")
+        draw_to_split_aces = st.checkbox(
+            "スプリットA後のヒット可", key="hr_draw_split_aces",
+            help="分割したエースに2枚目以降を引けるか。通常は各手1枚のみ。引けるとプレイヤー有利。")
         max_splits = st.number_input(
-            "最大スプリット追加回数", min_value=1, max_value=9, step=1, key="hr_max_splits")
+            "最大スプリット追加回数", min_value=1, max_value=9, step=1, key="hr_max_splits",
+            help="同じ数字を何回まで分割できるか（3＝最大4ハンドまで）。")
     with rc3:
         st.markdown("**サレンダー・ペネトレーション**")
         surrender_label = st.selectbox(
             "サレンダー",
             ["late（レイトサレンダー）", "none（なし）", "early（アーリーサレンダー）"],
-            key="hr_surrender")
+            key="hr_surrender",
+            help="不利な手で賭け金の半額を捨てて降りる権利。late＝ディーラーのBJ確認後に降りる一般的な方式。"
+                 "early＝確認前に降りられる強力な方式。")
         surrender_vs_ace_ui = st.checkbox(
-            "エース対面でのサレンダー可", key="hr_surrender_vs_ace")
+            "エース対面でのサレンダー可", key="hr_surrender_vs_ace",
+            help="ディーラーのアップカードがA（エース）のときもサレンダーできるか。")
         _pen_min = float(max(1, num_decks // 2))
         _pen_max = float(num_decks)   # 最大=全デッキ配布(100%)＝CSM相当
         # decks_dealt は num_decks に依存。session_state値を範囲にクランプしてから使う
@@ -469,6 +538,8 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
             st.caption(
                 f"→ {num_decks}デッキ中 {decks_dealt:g}デッキ配布してシャッフル"
                 f"（ペネトレーション {penetration:.0%}）")
+
+render_rule_guide()
 
 blackjack_pays = 1.5 if bj_pay_label.startswith("3:2") else 1.2
 soft17 = "S17" if soft17_label.startswith("S17") else "H17"
@@ -498,6 +569,39 @@ except ValueError as e:
     st.stop()
 
 st.info(f"📋 現在のルール: **{rules.short_description()}**")
+
+# ─── ハウスエッジ常時表示（Wizard of Odds公表値ベースの加法モデル） ───
+# ルールを変えるとリアルタイムに増減する。リードマグネットの「磁力の核」。
+_he = house_edge_wizard(rules)
+_ret = 100.0 - _he
+if _he <= 0.0:
+    _he_color, _he_bg, _he_msg = "#1B5E20", "#E8F5E9", "このルールは理論上プレイヤー有利（ごく稀な好条件）。"
+elif _he <= 0.5:
+    _he_color, _he_bg, _he_msg = "#2E7D32", "#E8F5E9", "優良な部類。ベーシックストラテジー前提なら十分に戦えるテーブルです。"
+elif _he <= 1.0:
+    _he_color, _he_bg, _he_msg = "#EF6C00", "#FFF3E0", "平均的〜やや不利。条件の良い卓を選ぶ余地があります。"
+else:
+    _he_color, _he_bg, _he_msg = "#C62828", "#FFEBEE", "不利な部類。特に 6:5 配当は還元率を大きく下げます（避けたい卓）。"
+st.markdown(
+    f'<div style="background:{_he_bg};border:1px solid {_he_color}33;'
+    f'border-left:5px solid {_he_color};border-radius:10px;'
+    f'padding:12px 16px;margin:6px 0 2px 0;">'
+    f'<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 20px;">'
+    f'<span style="font-size:0.78rem;font-weight:700;color:#546E7A;'
+    f'letter-spacing:0.08em;">このルールのハウスエッジ</span>'
+    f'<span style="font-size:1.9rem;font-weight:800;color:{_he_color};'
+    f'line-height:1;">{_he:.2f}<span style="font-size:1.0rem;">%</span></span>'
+    f'<span style="font-size:0.82rem;color:#37474F;">還元率 '
+    f'<strong style="color:{_he_color};">{_ret:.2f}%</strong></span>'
+    f'</div>'
+    f'<div style="font-size:0.8rem;color:#455A64;margin-top:6px;line-height:1.6;">'
+    f'{_he_msg}</div></div>',
+    unsafe_allow_html=True)
+st.caption(
+    "※ ハウスエッジ＝カジノ側の取り分（低いほどプレイヤー有利）。"
+    "Wizard of Odds 公表値ベースの加法モデルによる近似（連続シャッフラー基準・誤差±0.05〜0.1%）。"
+    "カットカード使用卓では実測が約+0.1%高くなります。"
+    "精密な検証は [Wizard of Odds 公式計算機](https://wizardofodds.com/games/blackjack/calculator/) をご利用ください。")
 
 
 
@@ -653,6 +757,99 @@ def legend_html(show_tc=False):
 
 
 # ===========================================================================
+# クイック判定（単手ルックアップ）— スマホの卓上で表より速い即答UI
+# ===========================================================================
+_ACTION_NAMES = {"H": "ヒット", "S": "スタンド", "D": "ダブルダウン",
+                 "P": "スプリット", "R": "サレンダー"}
+_QUICK_CARD_OPTS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+
+
+def _opt_rank(o: str) -> int:
+    return 11 if o == "A" else int(o)
+
+
+def _card_name(r: int) -> str:
+    return "A" if r == 11 else str(r)
+
+
+def render_quick_decision(rules, tc):
+    """自分の2枚＋ディーラーのアップカードから最善手と各アクションEVを即表示する。"""
+    st.markdown("##### ⚡ クイック判定（自分の手とディーラーを選ぶだけ）")
+    st.caption("スマホでも一目。自分の2枚とディーラーのアップカードを選ぶと、"
+               "最善手と「なぜ」を即表示します。表を探す必要はありません。")
+    qc1, qc2, qc3 = st.columns(3)
+    with qc1:
+        p1 = st.selectbox("自分のカード①", _QUICK_CARD_OPTS, index=9, key="q_p1")
+    with qc2:
+        p2 = st.selectbox("自分のカード②", _QUICK_CARD_OPTS, index=5, key="q_p2")
+    with qc3:
+        du = st.selectbox("ディーラー", _QUICK_CARD_OPTS, index=9, key="q_du")
+    c1, c2, dup = _opt_rank(p1), _opt_rank(p2), _opt_rank(du)
+    t1, s1 = (11, True) if c1 == 11 else (c1, False)
+    total, soft = add_card(t1, s1, c2)
+    is_pair = (c1 == c2)
+    pair_rank = c1 if is_pair else 0
+    is_bj = (c1 == 11 and c2 == 10) or (c1 == 10 and c2 == 11)
+
+    if is_pair:
+        hand_desc = f"{_card_name(c1)},{_card_name(c2)} = ペア（{'ソフト' if soft else 'ハード'}{total}）"
+    else:
+        hand_desc = f"{_card_name(c1)},{_card_name(c2)} = {'ソフト' if soft else 'ハード'}{total}"
+
+    if is_bj:
+        pay = "3:2（1.5倍）" if rules.blackjack_pays == 1.5 else "6:5（1.2倍）"
+        st.markdown(
+            '<div style="background:#FFF9C4;border:2px solid #F9A825;border-radius:12px;'
+            'padding:16px 18px;text-align:center;margin:6px 0;">'
+            '<div style="font-size:1.8rem;font-weight:800;color:#E65100;">'
+            'ブラックジャック！🎉</div>'
+            f'<div style="font-size:0.9rem;color:#6D4C41;font-weight:600;margin-top:4px;">'
+            f'配当 {pay}。アクション不要でそのまま勝ちです'
+            '（ディーラーがA・10のときは相手のBJ確認後に確定）。</div></div>',
+            unsafe_allow_html=True)
+        st.markdown("---")
+        return
+
+    best, evs = evaluate_hand(total, soft, is_pair, dup, rules,
+                              pair_rank=pair_rank, tc=tc)
+    bg = CELL_COLORS.get(best, "#ECEFF1")
+    fg = CELL_TEXT.get(best, "#37474F")
+    st.markdown(
+        f'<div style="background:{bg};border-radius:12px;padding:14px 18px;'
+        f'text-align:center;margin:6px 0;">'
+        f'<div style="font-size:0.8rem;color:{fg};opacity:0.85;font-weight:600;">'
+        f'あなたの手: {hand_desc} ／ ディーラー {_card_name(dup)}</div>'
+        f'<div style="font-size:2.0rem;font-weight:800;color:{fg};line-height:1.25;">'
+        f'{_ACTION_NAMES[best]}</div>'
+        f'<div style="font-size:0.9rem;color:{fg};font-weight:700;">（{best}）</div>'
+        f'</div>', unsafe_allow_html=True)
+
+    with st.expander("なぜ？（各アクションの期待値を比較）", expanded=False):
+        parts = []
+        for act, ev in sorted(evs.items(), key=lambda x: -x[1]):
+            abg = CELL_COLORS.get(act, "#ECEFF1")
+            afg = CELL_TEXT.get(act, "#37474F")
+            mark = ' <strong style="color:#1565C0;">← 最善</strong>' if act == best else ""
+            parts.append(
+                f'<div style="display:flex;align-items:center;gap:10px;margin:5px 0;">'
+                f'<span style="min-width:104px;background:{abg};color:{afg};'
+                f'padding:3px 10px;border-radius:5px;font-weight:700;font-size:0.85rem;'
+                f'text-align:center;">{_ACTION_NAMES[act]}</span>'
+                f'<span style="font-weight:700;color:{"#1B5E20" if ev >= 0 else "#B71C1C"};">'
+                f'{ev:+.3f}</span>{mark}</div>')
+        st.markdown("".join(parts), unsafe_allow_html=True)
+        st.caption("EV＝賭け金1単位あたりの期待値。最も高いアクションが最善手です。"
+                   "（マイナスでも、より損失の小さい手を選ぶのが最善になります）")
+
+    if total >= 12:
+        bd = stand_breakdown(total, dup, rules, tc=tc)
+        st.caption(
+            f"参考・スタンドした場合: 勝ち {bd['win'] * 100:.0f}% ／ "
+            f"引分 {bd['push'] * 100:.0f}% ／ 負け {bd['lose'] * 100:.0f}%")
+    st.markdown("---")
+
+
+# ===========================================================================
 # タブ
 # ===========================================================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -667,6 +864,16 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ---------------------------------------------------------------------------
 with tab1:
     st.subheader("ベーシックストラテジー")
+    st.markdown(
+        '<div style="background:#EEF2FF;border:1px solid #C5CAE9;border-radius:8px;'
+        'padding:10px 14px;margin-bottom:10px;font-size:0.85rem;color:#37474F;'
+        'line-height:1.65;">'
+        '<strong>🔰 3秒でわかる使い方</strong>　'
+        '① 上の「⚙️ ハウスルール設定」で遊ぶ卓の条件を選ぶ　→　'
+        '② すぐ下の<strong>⚡クイック判定</strong>で「自分の2枚」と「ディーラー」を選ぶと'
+        '最善手が出ます。迷ったら、まずここだけでOK。'
+        'じっくり派は下の早見表をどうぞ。</div>',
+        unsafe_allow_html=True)
 
     tc1_col, tc2_col = st.columns([3, 1])
     with tc1_col:
@@ -691,6 +898,9 @@ with tab1:
     if should_take_insurance(tab1_tc):
         st.success(f"TC {tab1_tc:+d} → インシュランスを取る（TC ≥ +3）")
 
+    render_quick_decision(rules, tab1_tc)
+
+    st.caption("▼ 以下は全パターンの早見表です（じっくり確認したい方向け）")
     st.markdown(legend_html(show_tc=bool(changed_cells)), unsafe_allow_html=True)
     if changed_cells:
         st.caption(
@@ -767,10 +977,15 @@ with tab1:
     bp.metric("引き分け (Push)", f"{bd['push'] * 100:.1f}%")
     bl.metric("負け率 (Lose)", f"{bd['lose'] * 100:.1f}%")
     st.caption(
-        f"スタンドEV（= 勝率 − 負け率）: **{bd['ev']:+.4f}**　"
-        f"／ ディーラーアップカード {_up_label(wl_up)}・TC {tab1_tc:+d}・"
-        f"{rules.short_description()} 条件。"
-        "（ディーラーがBJを確認するルールでは、ディーラーBJ非確定の条件付き分布です）")
+        f"この手でスタンドしたときの期待値（勝率 − 負け率）＝ **{bd['ev']:+.4f}**"
+        "（賭け金1単位あたり。プラスなら有利、マイナスなら不利）。\n\n"
+        f"条件：ディーラー {_up_label(wl_up)}・TC {tab1_tc:+d}・{rules.short_description()}")
+    if wl_up in (10, 11):
+        st.caption(
+            "※ ディーラーが10またはAを見せているときのこの勝率は、"
+            "「ディーラーが最初からブラックジャックではなかった場合」の数字です。"
+            "（もしディーラーがブラックジャックなら、その時点で勝負が決まり、"
+            "あなたがプレイする場面にならないためです。）")
 
     # 参考: ディーラー最終手分布の内訳も併記
     dlr = bd["dealer"]
