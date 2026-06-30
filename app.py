@@ -416,6 +416,27 @@ def _apply_ruleset():
             st.session_state[_key] = _val
 
 
+# はじめての方向けオンボーディング：お店を選ぶ1問だけでルールを自動セット
+_ONB_PLACEHOLDER = "（お店を選んでください）"
+_ONB_STANDARD = "まだ決めていない・標準設定でOK"
+
+
+def _apply_onboarding():
+    """オンボーディングの1問選択を、下のハウスルール設定へそのまま流し込む。
+    プリセット名なら該当値を、「標準設定でOK」なら無難な既定値を適用し、
+    下の詳細パネル(hr_ruleset)の選択表示も同期させる。"""
+    name = st.session_state.get("onb_ruleset")
+    if name in RULESET_PRESETS:
+        for _key, _val in RULESET_PRESETS[name].items():
+            st.session_state[_key] = _val
+        st.session_state["hr_ruleset"] = name
+    elif name == _ONB_STANDARD:
+        for _key, _val in _HR_DEFAULTS.items():
+            st.session_state[_key] = _val
+        st.session_state["hr_ruleset"] = "カスタム（手動設定）"
+    # プレースホルダー選択時は何もしない（既定値のまま）
+
+
 _GUIDE_IMG_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "assets", "guide")
 
@@ -443,6 +464,30 @@ st.markdown(
     '<strong>Step 3.</strong> 表示された<strong>最善手</strong>のとおりにプレイ。'
     'その卓の<strong>ハウスエッジ（カジノの取り分）</strong>も自動で表示されます。</div>',
     unsafe_allow_html=True)
+
+# ─── はじめての方へ：1問だけのオンボーディング ───
+st.markdown(
+    '<div style="background:#FFF8E1;border:1px solid #FFD54F;border-radius:10px;'
+    'padding:12px 16px 4px;margin-bottom:6px;font-size:0.92rem;color:#5D4037;'
+    'line-height:1.6;">'
+    '<span style="font-weight:800;">🔰 はじめての方へ</span> — '
+    'まずは<strong>遊ぶお店を選ぶだけ</strong>。あとのルール設定は自動で入ります。'
+    '</div>',
+    unsafe_allow_html=True)
+_onb_options = [_ONB_PLACEHOLDER] + list(RULESET_PRESETS.keys()) + [_ONB_STANDARD]
+st.radio(
+    "遊ぶお店（プリセット）",
+    _onb_options,
+    key="onb_ruleset",
+    on_change=_apply_onboarding,
+    label_visibility="collapsed",
+)
+if st.session_state.get("onb_ruleset", _ONB_PLACEHOLDER) != _ONB_PLACEHOLDER:
+    st.caption("✅ ルールを自動セットしました。卓ごとの違いを微調整したいときだけ、"
+               "下の「⚙️ ハウスルール設定」を開いてください。")
+else:
+    st.caption("お店が分からない／一覧にない場合は「" + _ONB_STANDARD +
+               "」を選べば、一般的な設定ですぐ使えます。")
 
 with st.expander("⚙️  ハウスルール設定（クリックで展開）", expanded=False):
     if st.session_state.pop("_preset_saved_flag", None):
@@ -992,6 +1037,19 @@ def render_quick_decision(rules, tc):
         f'この選択の期待値（EV）＝ <strong style="color:{ev_col};">{best_ev:+.3f}</strong>'
         f'（賭け金1単位あたり。プラスなら有利、マイナスなら最も損失の小さい手）</div></div>',
         unsafe_allow_html=True)
+
+    with st.expander("❓ 期待値（EV）って何？（はじめての方へ）", expanded=False):
+        st.markdown(
+            "**EV（期待値）＝その手を100回打ったときの、賭け金1単位あたりの平均的な損益**です。\n\n"
+            "- **EVプラス**：長い目で見て<strong>あなたが有利</strong>な場面です。\n"
+            "- **EVマイナス**：不利な場面ですが、表示された最善手は"
+            "<strong>「数ある選択肢の中で最も損失が小さい打ち方」</strong>です。\n\n"
+            "ブラックジャックはもともとカジノがわずかに有利なゲームなので、"
+            "EVマイナスの場面は普通にあります。大切なのは"
+            "**毎回いちばん損の小さい（＝EVの高い）手を選び続けること**。"
+            "それが長期的に負けを最小化する唯一の方法です。",
+            unsafe_allow_html=True)
+        st.caption("※ 1回ごとの勝ち負けは運で上下します。EVは「長く続けたときの平均」の指標です。")
 
     with st.expander("📐 もっと詳しく（各アクションの期待値を数字で比較）", expanded=False):
         parts = []
