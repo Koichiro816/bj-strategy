@@ -3,6 +3,7 @@ app.py — Streamlit ウェブアプリ（スマホ対応）
 """
 
 import os
+import random
 import tempfile
 
 import pandas as pd
@@ -1007,6 +1008,107 @@ def render_quick_decision(rules, tc):
 
 
 # ===========================================================================
+# トレーニング（遊んで覚える練習モード）— 出された手の最善手を当てる
+# ===========================================================================
+def _deal_training_hand():
+    """学習用にランダムな手を配る。10値札は実際の出現率に合わせ4倍の重み。
+    ナチュラル（A＋10値）はアクション判断が不要なので配り直す。"""
+    weights = [4 if o == _TEN_OPT else 1 for o in _QUICK_CARD_OPTS]
+    while True:
+        p1, p2, du = random.choices(_QUICK_CARD_OPTS, weights=weights, k=3)
+        c1, c2 = _opt_rank(p1), _opt_rank(p2)
+        if not ((c1 == 11 and c2 == 10) or (c1 == 10 and c2 == 11)):
+            return p1, p2, du
+
+
+def _hand_analysis(p1, p2, du, rules, tc):
+    """選択肢文字列の手を解析し、最善手・各EV・手の属性を返す。"""
+    c1, c2, dup = _opt_rank(p1), _opt_rank(p2), _opt_rank(du)
+    t1, s1 = (11, True) if c1 == 11 else (c1, False)
+    total, soft = add_card(t1, s1, c2)
+    is_pair = (c1 == c2)
+    pair_rank = c1 if is_pair else 0
+    best, evs = evaluate_hand(total, soft, is_pair, dup, rules,
+                              pair_rank=pair_rank, tc=tc)
+    return best, evs, total, soft, pair_rank, dup
+
+
+def render_trainer(rules, tc):
+    """配られた手の最善手をボタンで当てる練習モード。即時フィードバック＋成績記録。"""
+    ss = st.session_state
+    for _k, _v in (("tr_total", 0), ("tr_correct", 0),
+                   ("tr_streak", 0), ("tr_best", 0)):
+        ss.setdefault(_k, _v)
+    if "tr_hand" not in ss:
+        ss["tr_hand"] = _deal_training_hand()
+        ss["tr_answered"] = None
+
+    st.markdown("##### 🎓 トレーニング（出された手の最善手を当てる）")
+    st.caption("配られた手に対して、あなたなら何をする？ ボタンで選ぶと正解と理由がすぐ分かります。"
+               "繰り返すうちに、表を見なくても手が動くようになります。")
+
+    p1, p2, du = ss["tr_hand"]
+    best, evs, total, soft, pair_rank, dup = _hand_analysis(p1, p2, du, rules, tc)
+    st.markdown(_table_view_html(p1, p2, du), unsafe_allow_html=True)
+
+    answered = ss.get("tr_answered")
+    if not answered:
+        st.caption("↓ あなたならどうする？")
+        acts = [a for a in ("H", "S", "D", "P", "R") if a in evs]
+        cols = st.columns(len(acts))
+        for i, act in enumerate(acts):
+            if cols[i].button(_ACTION_NAMES[act], key=f"tr_btn_{act}",
+                              width='stretch'):
+                ok = (act == best)
+                ss["tr_total"] += 1
+                if ok:
+                    ss["tr_correct"] += 1
+                    ss["tr_streak"] += 1
+                    ss["tr_best"] = max(ss["tr_best"], ss["tr_streak"])
+                else:
+                    ss["tr_streak"] = 0
+                ss["tr_answered"] = (act, ok)
+                st.rerun()
+    else:
+        chosen, ok = answered
+        if ok:
+            st.success(f"⭕ 正解！　{_ACTION_NAMES[best]}（{best}）")
+        else:
+            st.error(f"❌ 残念。あなたは「{_ACTION_NAMES[chosen]}」、"
+                     f"正解は「{_ACTION_NAMES[best]}（{best}）」です。")
+        be = evs[best]
+        ec = "#1B5E20" if be >= 0 else "#B71C1C"
+        st.markdown(
+            f'<div style="background:#F1F8E9;border-left:4px solid #7CB342;'
+            f'border-radius:6px;padding:10px 14px;margin:2px 0 8px;font-size:0.9rem;'
+            f'line-height:1.65;color:#33401F;">💡 '
+            f'{_plain_reason(best, total, soft, pair_rank, dup, evs)}'
+            f'<div style="margin-top:6px;font-size:0.85rem;color:#455A64;">'
+            f'最善手の期待値（EV）＝ <strong style="color:{ec};">{be:+.3f}</strong>'
+            f'（賭け金1単位あたり）</div></div>',
+            unsafe_allow_html=True)
+        if st.button("次の問題 ▶", type="primary", width='stretch'):
+            ss["tr_hand"] = _deal_training_hand()
+            ss["tr_answered"] = None
+            st.rerun()
+
+    tot, cor = ss["tr_total"], ss["tr_correct"]
+    acc = (cor / tot * 100) if tot else 0.0
+    s1m, s2m, s3m = st.columns(3)
+    s1m.metric("正答率", f"{acc:.0f}%")
+    s2m.metric("連続正解", f"{ss['tr_streak']}")
+    s3m.metric("最高連続", f"{ss['tr_best']}")
+    st.caption(f"これまで {cor}/{tot} 問正解。"
+               + ("いい調子です！" if acc >= 80 and tot >= 5 else
+                  "間違えた手こそ伸びしろ。理由を読んで次へ。" if tot >= 1 else
+                  "まずは1問やってみましょう。"))
+    if tot >= 1 and st.button("成績をリセット", key="tr_reset"):
+        for _k in ("tr_total", "tr_correct", "tr_streak", "tr_best"):
+            ss[_k] = 0
+        st.rerun()
+
+
+# ===========================================================================
 # タブ
 # ===========================================================================
 def render_bs_tables(display_table, ev_table, changed_cells, tab1_tc, show_ev, rules):
@@ -1128,12 +1230,14 @@ with tab1:
         display_table, changed_cells = apply_tc_overlay(strategy_table, tab1_tc, rules)
     ev_table = generate_ev_table(display_table, rules, tc=tab1_tc) if show_ev else None
 
-    _sub_q, _sub_t, _sub_b = st.tabs(
-        ["⚡ クイック判定", "📊 早見表（全パターン）", "🎯 勝敗内訳"])
+    _sub_q, _sub_tr, _sub_t, _sub_b = st.tabs(
+        ["⚡ クイック判定", "🎓 トレーニング", "📊 早見表（全パターン）", "🎯 勝敗内訳"])
     with _sub_q:
         if should_take_insurance(tab1_tc):
             st.success(f"TC {tab1_tc:+d} → インシュランスを取る（TC ≥ +3）")
         render_quick_decision(rules, tab1_tc)
+    with _sub_tr:
+        render_trainer(rules, tab1_tc)
     with _sub_t:
         render_bs_tables(display_table, ev_table, changed_cells, tab1_tc, show_ev, rules)
     with _sub_b:
