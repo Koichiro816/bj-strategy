@@ -426,8 +426,10 @@ def _apply_onboarding():
     プリセット名なら該当値を、「標準設定でOK」なら無難な既定値を適用し、
     下の詳細パネル(hr_ruleset)の選択表示も同期させる。"""
     name = st.session_state.get("onb_ruleset")
-    if name in RULESET_PRESETS:
-        for _key, _val in RULESET_PRESETS[name].items():
+    preset = (RULESET_PRESETS.get(name)
+              or st.session_state.get("user_presets", {}).get(name))
+    if preset:
+        for _key, _val in preset.items():
             st.session_state[_key] = _val
         st.session_state["hr_ruleset"] = name
     elif name == _ONB_STANDARD:
@@ -450,20 +452,17 @@ def _img_popover(label, filename, caption):
         st.caption(caption)
 
 
-# ─── 使い方ステップ（最上部・初心者導線） ───
-st.markdown(
-    '<div style="background:#E8F5E9;border:1px solid #A5D6A7;border-radius:10px;'
-    'padding:12px 16px;margin-bottom:12px;font-size:0.9rem;color:#1B3D24;'
-    'line-height:1.7;">'
-    '<div style="font-weight:800;font-size:0.95rem;margin-bottom:4px;">'
-    '📋 使い方は3ステップ</div>'
-    '<strong>Step 1.</strong> 下の「⚙️ ハウスルール設定」で、遊ぶ卓の条件を選ぶ'
-    '（ルールが分からなければ各項目の「📷 見分け方」ボタンで写真を確認）<br>'
-    '<strong>Step 2.</strong> 「ベーシックストラテジー」タブの<strong>⚡クイック判定</strong>で、'
-    '自分の2枚とディーラーのカードを選ぶ<br>'
-    '<strong>Step 3.</strong> 表示された<strong>最善手</strong>のとおりにプレイ。'
-    'その卓の<strong>ハウスエッジ（カジノの取り分）</strong>も自動で表示されます。</div>',
-    unsafe_allow_html=True)
+# ─── 使い方ステップ（折り畳み・一度見れば十分なのでデフォルト閉） ───
+with st.expander("📋 使い方は3ステップ（はじめての方はこちら）", expanded=False):
+    st.markdown(
+        '<div style="font-size:0.9rem;color:#1B3D24;line-height:1.7;">'
+        '<strong>Step 1.</strong> 下の「⚙️ ハウスルール設定」で、遊ぶ卓の条件を選ぶ'
+        '（ルールが分からなければ各項目の「📷 見分け方」ボタンで写真を確認）<br>'
+        '<strong>Step 2.</strong> 「ベーシックストラテジー」タブの<strong>⚡クイック判定</strong>で、'
+        '自分の2枚とディーラーのカードを選ぶ<br>'
+        '<strong>Step 3.</strong> 表示された<strong>最善手</strong>のとおりにプレイ。'
+        'その卓の<strong>ハウスエッジ（カジノの取り分）</strong>も自動で表示されます。</div>',
+        unsafe_allow_html=True)
 
 # ─── はじめての方へ：1問だけのオンボーディング ───
 st.markdown(
@@ -474,7 +473,8 @@ st.markdown(
     'まずは<strong>遊ぶお店を選ぶだけ</strong>。あとのルール設定は自動で入ります。'
     '</div>',
     unsafe_allow_html=True)
-_onb_options = [_ONB_PLACEHOLDER] + list(RULESET_PRESETS.keys()) + [_ONB_STANDARD]
+_onb_options = ([_ONB_PLACEHOLDER] + list(RULESET_PRESETS.keys())
+                + list(st.session_state["user_presets"].keys()) + [_ONB_STANDARD])
 st.radio(
     "遊ぶお店（プリセット）",
     _onb_options,
@@ -1038,19 +1038,6 @@ def render_quick_decision(rules, tc):
         f'（賭け金1単位あたり。プラスなら有利、マイナスなら最も損失の小さい手）</div></div>',
         unsafe_allow_html=True)
 
-    with st.expander("❓ 期待値（EV）って何？（はじめての方へ）", expanded=False):
-        st.markdown(
-            "**EV（期待値）＝その手を100回打ったときの、賭け金1単位あたりの平均的な損益**です。\n\n"
-            "- **EVプラス**：長い目で見て<strong>あなたが有利</strong>な場面です。\n"
-            "- **EVマイナス**：不利な場面ですが、表示された最善手は"
-            "<strong>「数ある選択肢の中で最も損失が小さい打ち方」</strong>です。\n\n"
-            "ブラックジャックはもともとカジノがわずかに有利なゲームなので、"
-            "EVマイナスの場面は普通にあります。大切なのは"
-            "**毎回いちばん損の小さい（＝EVの高い）手を選び続けること**。"
-            "それが長期的に負けを最小化する唯一の方法です。",
-            unsafe_allow_html=True)
-        st.caption("※ 1回ごとの勝ち負けは運で上下します。EVは「長く続けたときの平均」の指標です。")
-
     with st.expander("📐 もっと詳しく（各アクションの期待値を数字で比較）", expanded=False):
         parts = []
         for act, ev in sorted(evs.items(), key=lambda x: -x[1]):
@@ -1067,6 +1054,19 @@ def render_quick_decision(rules, tc):
         st.markdown("".join(parts), unsafe_allow_html=True)
         st.caption("EV＝賭け金1単位あたりの期待値。最も高いアクションが最善手です。"
                    "（マイナスでも、より損失の小さい手を選ぶのが最善になります）")
+
+    with st.expander("❓ 期待値（EV）って何？（はじめての方へ）", expanded=False):
+        st.markdown(
+            "**EV（期待値）＝その手を100回打ったときの、賭け金1単位あたりの平均的な損益**です。\n\n"
+            "- **EVプラス**：長い目で見て<strong>あなたが有利</strong>な場面です。\n"
+            "- **EVマイナス**：不利な場面ですが、表示された最善手は"
+            "<strong>「数ある選択肢の中で最も損失が小さい打ち方」</strong>です。\n\n"
+            "ブラックジャックはもともとカジノがわずかに有利なゲームなので、"
+            "EVマイナスの場面は普通にあります。大切なのは"
+            "**毎回いちばん損の小さい（＝EVの高い）手を選び続けること**。"
+            "それが長期的に負けを最小化する唯一の方法です。",
+            unsafe_allow_html=True)
+        st.caption("※ 1回ごとの勝ち負けは運で上下します。EVは「長く続けたときの平均」の指標です。")
 
     if total >= 12:
         bd = stand_breakdown(total, dup, rules, tc=tc)
