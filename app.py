@@ -43,7 +43,7 @@ def _check_password():
     st.title("🃏 BJ Strategy")
     pw = st.text_input("パスワード", type="password", label_visibility="collapsed",
                        placeholder="パスワードを入力してください")
-    if st.button("ログイン", use_container_width=True, type="primary"):
+    if st.button("ログイン", width='stretch', type="primary"):
         if pw == correct:
             st.session_state.authenticated = True
             st.rerun()
@@ -287,7 +287,7 @@ def _render_pro_gate() -> bool:
         if st.session_state.is_pro:
             st.success("PRO 機能が有効です")
             st.caption("シミュレーター・インデックス・PDF出力が利用できます。")
-            if st.button("ログアウト（無料に戻す）", use_container_width=True):
+            if st.button("ログアウト（無料に戻す）", width='stretch'):
                 st.session_state.is_pro = False
                 st.rerun()
         else:
@@ -296,7 +296,7 @@ def _render_pro_gate() -> bool:
                 "PROアクセスコード", type="password",
                 placeholder="購入時に発行されたコードを入力",
                 help="シミュレーター・インデックスプレイ・PDF出力を解放します。")
-            if st.button("PROを有効化", use_container_width=True, type="primary"):
+            if st.button("PROを有効化", width='stretch', type="primary"):
                 if code.strip() in _get_pro_codes():
                     st.session_state.is_pro = True
                     st.rerun()
@@ -421,10 +421,10 @@ _GUIDE_IMG_DIR = os.path.join(
 
 def _img_popover(label, filename, caption):
     """ルール設定の隣に置く「📷 見分け方」ポップオーバー（押すと写真が出る）。"""
-    with st.popover(label, use_container_width=True):
+    with st.popover(label, width='stretch'):
         _p = os.path.join(_GUIDE_IMG_DIR, filename)
         if os.path.exists(_p):
-            st.image(_p, use_container_width=True)
+            st.image(_p, width='stretch')
         st.caption(caption)
 
 
@@ -557,7 +557,7 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
         "プリセット名", key="hr_preset_name", placeholder="例：六本木○○カジノ")
     _ps1, _ps2 = st.columns(2)
     with _ps1:
-        if st.button("現在の設定を保存", use_container_width=True):
+        if st.button("現在の設定を保存", width='stretch'):
             _nm = (_save_name or "").strip()
             if not _nm:
                 st.warning("プリセット名を入力してください。")
@@ -573,7 +573,7 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
         if _user_names:
             _del = st.selectbox(
                 "保存済みを削除", ["（選択）"] + _user_names, key="hr_preset_del")
-            if st.button("選択を削除", use_container_width=True) and _del in _user_names:
+            if st.button("選択を削除", width='stretch') and _del in _user_names:
                 del st.session_state["user_presets"][_del]
                 if st.session_state.get("hr_ruleset") == _del:
                     st.session_state["hr_ruleset"] = "カスタム（手動設定）"
@@ -816,19 +816,40 @@ def _card_name(r: int) -> str:
     return "A" if r == 11 else str(r)
 
 
+# ランクごとに固定のスートを割り当て（赤黒が混じり本物の札らしく見せる。
+# ブラックジャックではスートは無関係なので見た目専用）。
+_CARD_SUIT = {
+    "2": "♠", "3": "♥", "4": "♦", "5": "♣", "6": "♠", "7": "♥",
+    "8": "♦", "9": "♣", "10": "♠", "J": "♥", "Q": "♦", "K": "♣", "A": "♠",
+}
+
+
 def _mini_card_html(rank, selected, href):
-    """小さなトランプの絵（白カード＋ランク＋スペード）。タップで選択。"""
-    ring = ("box-shadow:0 0 0 3px #1565C0;" if selected
-            else "box-shadow:0 1px 2px rgba(0,0,0,.35);")
+    """本物のトランプ風ミニカード（左上＋右下に角インデックス、中央に大きなスート）。
+    タップで選択。ブラックジャックではスートは無関係なため見た目専用。"""
+    suit = _CARD_SUIT.get(rank, "♠")
+    col = "#C62828" if suit in ("♥", "♦") else "#111"
+    ring = (";box-shadow:0 0 0 3px #1565C0;transform:translateY(-2px);"
+            if selected
+            else ";box-shadow:0 1px 3px rgba(0,0,0,.30);")
+    # 角インデックス（ランク＋スートを縦に小さく）。"10"は幅広なので少し小さく。
+    rsz = 11 if rank == "10" else 13
+    idx = (f'<span style="font-size:{rsz}px;font-weight:800;line-height:1;">{rank}</span>'
+           f'<span style="font-size:9px;line-height:1;">{suit}</span>')
     return (
         f'<a href="{href}" target="_self" style="text-decoration:none;flex:0 0 auto;">'
-        f'<div style="width:40px;height:56px;border:1px solid #888;border-radius:5px;'
-        f'background:#fff;position:relative;{ring}">'
-        f'<span style="position:absolute;top:1px;left:3px;font-size:13px;font-weight:800;'
-        f'color:#111;line-height:1;">{rank}</span>'
-        f'<span style="position:absolute;top:48%;left:50%;transform:translate(-50%,-50%);'
-        f'font-size:20px;color:#111;">♠</span>'
-        f'<span style="position:absolute;bottom:0;right:3px;font-size:11px;color:#111;">♠</span>'
+        f'<div style="width:40px;height:56px;border:1px solid #9e9e9e;border-radius:6px;'
+        f'background:linear-gradient(180deg,#fff 0%,#f4f4f4 100%);position:relative;'
+        f'color:{col};transition:all .08s{ring}">'
+        # 左上インデックス
+        f'<div style="position:absolute;top:2px;left:3px;display:flex;flex-direction:column;'
+        f'align-items:center;">{idx}</div>'
+        # 中央の大きなスート
+        f'<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'
+        f'font-size:22px;opacity:.92;">{suit}</span>'
+        # 右下インデックス（180°回転で対称）
+        f'<div style="position:absolute;bottom:2px;right:3px;display:flex;'
+        f'flex-direction:column;align-items:center;transform:rotate(180deg);">{idx}</div>'
         f'</div></a>')
 
 
@@ -1019,7 +1040,7 @@ def render_stand_breakdown_section(rules, tab1_tc):
         columns=["ディーラー最終手", "確率"])
     dlr_df["確率"] = (dlr_df["確率"] * 100).map(lambda x: f"{x:.1f}%")
     with st.expander("ディーラー最終手の確率分布（参考）"):
-        st.dataframe(dlr_df, use_container_width=True, hide_index=True)
+        st.dataframe(dlr_df, width='stretch', hide_index=True)
 
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -1093,7 +1114,7 @@ with tab2:
                 [(h, _up_label(d) if isinstance(d, int) else d, _thr_label(thr, direction), a)
                  for (h, d, thr, a, direction) in active],
                 columns=["ハンド", "ディーラー", "発動条件", "アクション"])
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
         else:
             st.write("発動中の逸脱プレイはありません（BS通りにプレイ）。")
 
@@ -1104,7 +1125,7 @@ with tab2:
             [(h, _up_label(d) if isinstance(d, int) else d, _thr_label(thr, direction), a)
              for (h, d, thr, a, direction) in filtered_idx],
             columns=["ハンド", "ディーラー", "発動条件", "アクション"])
-        st.dataframe(all_idx, use_container_width=True, hide_index=True)
+        st.dataframe(all_idx, width='stretch', hide_index=True)
         n_excluded = len(ILLUSTRIOUS_18) + len(FAB_4) - len(filtered_idx)
         if n_excluded > 0:
             st.caption(
@@ -1239,7 +1260,7 @@ if IS_PRO:
                 hovermode="x unified", dragmode="pan")
             # scrollZoomはマウスホイールをグラフ側で奪い、ページスクロールが
             # 効かなくなる（グラフ通過後に上に戻せなくなる）ため有効化しない。
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             st.caption(
                 f"全 {res.num_hands:,} 手のシミュレーション結果を、"
                 f"{sample_every:,} 手ごとに{len(res.bankroll_curve):,} 点サンプリングして"
