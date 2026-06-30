@@ -968,11 +968,16 @@ def render_quick_decision(rules, tc):
         f'<div style="font-size:0.9rem;color:{fg};font-weight:700;">（{best}）</div>'
         f'</div>', unsafe_allow_html=True)
 
-    # 初心者向け：理由を平易な日本語で常時表示
+    # 初心者向け：理由を平易な日本語で常時表示（EVも併記）
+    best_ev = evs[best]
+    ev_col = "#1B5E20" if best_ev >= 0 else "#B71C1C"
     st.markdown(
         f'<div style="background:#F1F8E9;border-left:4px solid #7CB342;'
         f'border-radius:6px;padding:10px 14px;margin:2px 0 8px;font-size:0.9rem;'
-        f'line-height:1.65;color:#33401F;">💡 {_plain_reason(best, total, soft, pair_rank, dup, evs)}</div>',
+        f'line-height:1.65;color:#33401F;">💡 {_plain_reason(best, total, soft, pair_rank, dup, evs)}'
+        f'<div style="margin-top:6px;font-size:0.85rem;color:#455A64;">'
+        f'この選択の期待値（EV）＝ <strong style="color:{ev_col};">{best_ev:+.3f}</strong>'
+        f'（賭け金1単位あたり。プラスなら有利、マイナスなら最も損失の小さい手）</div></div>',
         unsafe_allow_html=True)
 
     with st.expander("📐 もっと詳しく（各アクションの期待値を数字で比較）", expanded=False):
