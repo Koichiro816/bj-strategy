@@ -867,6 +867,56 @@ def _pills_picker(label, key, default):
     return st.session_state[key] or default
 
 
+def _dealer_strength_phrase(dup):
+    """ディーラーのアップカードの強さを初心者向けの言葉にする。"""
+    name = _card_name(dup)
+    if dup in (4, 5, 6):
+        return f"ディーラーの{name}は最も弱く、自分でバーストしやすい"
+    if dup in (2, 3):
+        return f"ディーラーの{name}は弱め"
+    if dup in (7, 8):
+        return f"ディーラーの{name}はやや強い"
+    return f"ディーラーの{name}は強い"  # 9,10,A
+
+
+def _plain_reason(best, total, soft, pair_rank, dup, evs):
+    """最善手の理由を、EVの数字ではなく平易な日本語で説明する（初心者向け）。"""
+    dlr = _dealer_strength_phrase(dup)
+    vals = sorted(evs.values(), reverse=True)
+    close = len(vals) >= 2 and (vals[0] - vals[1]) < 0.03
+    tail = "（僅差の選択なので、表通りで大丈夫です）" if close else ""
+
+    if best == "R":
+        return (f"{dlr}。この手はどう打っても勝ちにくい、最も不利な組み合わせです。"
+                "賭け金の半分を返してもらい、損失を最小限にします（サレンダー）。")
+    if best == "P":
+        pname = _card_name(pair_rank)
+        if pair_rank == 11:
+            return ("A のペアは、分ければ2つの手がそれぞれ21に届きやすくなる超有利な形。"
+                    "必ず分けます（スプリット）。")
+        if pair_rank == 8:
+            return ("8 のペアの「16」はそのままでは最も弱い手のひとつ。分けて2つの新しい手を"
+                    "作る方がずっと有利です（スプリット）。")
+        return (f"{dlr}。{pname} のペアは、分けて2つの手にした方が有利になります（スプリット）。")
+    if best == "D":
+        why = "A があり安全に伸ばせて" if soft else "あと1枚で大きく伸びやすく"
+        return (f"{dlr}。{why}、勝ちやすい場面です。賭けを2倍にして1枚だけ引いて"
+                f"勝負します（ダブルダウン）。{tail}")
+    if best == "S":
+        if total >= 17:
+            return (f"合計 {total} は十分高く、ここで引くとバーストの危険が大きいので止めます"
+                    "（スタンド）。あとはディーラーの結果を待ちます。")
+        return (f"{dlr}。あなたの {total} は引くとバーストしやすい手ですが、"
+                f"弱いディーラーが自滅（バースト）するのを待つ方が得なので止めます"
+                f"（スタンド）。{tail}")
+    # H（ヒット）
+    if total <= 11:
+        return ("この合計なら何を引いてもバーストしません。迷わずもう1枚引いて手を強くします"
+                "（ヒット）。")
+    return (f"{dlr}。今の {total} のままでは勝ちにくいので、もう1枚引いて手を強くします"
+            f"（ヒット）。弱い手のまま止める方が、バーストより危険な場面です。{tail}")
+
+
 def render_quick_decision(rules, tc):
     """自分の2枚＋ディーラーのアップカードから最善手と各アクションEVを即表示する。"""
     st.markdown("##### ⚡ クイック判定（自分の手とディーラーを選ぶだけ）")
@@ -918,7 +968,14 @@ def render_quick_decision(rules, tc):
         f'<div style="font-size:0.9rem;color:{fg};font-weight:700;">（{best}）</div>'
         f'</div>', unsafe_allow_html=True)
 
-    with st.expander("なぜ？（各アクションの期待値を比較）", expanded=False):
+    # 初心者向け：理由を平易な日本語で常時表示
+    st.markdown(
+        f'<div style="background:#F1F8E9;border-left:4px solid #7CB342;'
+        f'border-radius:6px;padding:10px 14px;margin:2px 0 8px;font-size:0.9rem;'
+        f'line-height:1.65;color:#33401F;">💡 {_plain_reason(best, total, soft, pair_rank, dup, evs)}</div>',
+        unsafe_allow_html=True)
+
+    with st.expander("📐 もっと詳しく（各アクションの期待値を数字で比較）", expanded=False):
         parts = []
         for act, ev in sorted(evs.items(), key=lambda x: -x[1]):
             abg = CELL_COLORS.get(act, "#ECEFF1")
