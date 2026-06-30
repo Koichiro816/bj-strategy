@@ -801,38 +801,65 @@ def legend_html(show_tc=False):
 # ===========================================================================
 _ACTION_NAMES = {"H": "ヒット", "S": "スタンド", "D": "ダブルダウン",
                  "P": "スプリット", "R": "サレンダー"}
-_QUICK_CARD_OPTS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+_QUICK_CARD_OPTS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 
 
 def _opt_rank(o: str) -> int:
-    return 11 if o == "A" else int(o)
+    if o == "A":
+        return 11
+    if o in ("J", "Q", "K"):
+        return 10
+    return int(o)
 
 
 def _card_name(r: int) -> str:
     return "A" if r == 11 else str(r)
 
 
+def _mini_card_html(rank, selected, href):
+    """小さなトランプの絵（白カード＋ランク＋スペード）。タップで選択。"""
+    ring = ("box-shadow:0 0 0 3px #1565C0;" if selected
+            else "box-shadow:0 1px 2px rgba(0,0,0,.35);")
+    return (
+        f'<a href="{href}" target="_self" style="text-decoration:none;flex:0 0 auto;">'
+        f'<div style="width:40px;height:56px;border:1px solid #888;border-radius:5px;'
+        f'background:#fff;position:relative;{ring}">'
+        f'<span style="position:absolute;top:1px;left:3px;font-size:13px;font-weight:800;'
+        f'color:#111;line-height:1;">{rank}</span>'
+        f'<span style="position:absolute;top:48%;left:50%;transform:translate(-50%,-50%);'
+        f'font-size:20px;color:#111;">♠</span>'
+        f'<span style="position:absolute;bottom:0;right:3px;font-size:11px;color:#111;">♠</span>'
+        f'</div></a>')
+
+
 def _card_picker(label, key, default):
-    """カードを「タップ」して選ぶピッカー（プルダウンを廃止）。選択中は青く強調。"""
+    """カードを横一列の小さな絵で並べ、タップで選ぶ（スマホでも横並び・横スクロール）。"""
     if key not in st.session_state:
         st.session_state[key] = default
     cur = st.session_state[key]
     st.markdown(
-        f"<div style='font-size:0.82rem;font-weight:700;color:#37474F;margin:2px 0;'>"
-        f"{label}：<span style='color:#1565C0;font-size:1.0rem;'>{cur}</span></div>",
+        f"<div style='font-size:0.82rem;font-weight:700;color:#37474F;margin:6px 0 2px;'>"
+        f"{label}：<span style='color:#1565C0;'>{cur}</span></div>",
         unsafe_allow_html=True)
-    cols = st.columns(10)
-    for i, r in enumerate(_QUICK_CARD_OPTS):
-        with cols[i]:
-            if st.button(r, key=f"{key}_{r}", use_container_width=True,
-                         type="primary" if r == cur else "secondary"):
-                st.session_state[key] = r
-                st.rerun()
+    cards = "".join(
+        _mini_card_html(r, r == cur, f"?pick={key}:{r}") for r in _QUICK_CARD_OPTS)
+    st.markdown(
+        f'<div style="display:flex;gap:5px;overflow-x:auto;padding:3px 0 6px;'
+        f'-webkit-overflow-scrolling:touch;">{cards}</div>',
+        unsafe_allow_html=True)
     return st.session_state[key]
 
 
 def render_quick_decision(rules, tc):
     """自分の2枚＋ディーラーのアップカードから最善手と各アクションEVを即表示する。"""
+    # カードの絵をタップ→ ?pick=slot:rank で選択を反映
+    _pick = st.query_params.get("pick")
+    if _pick and ":" in _pick:
+        _slot, _val = _pick.split(":", 1)
+        if _slot in ("q_p1", "q_p2", "q_du") and _val in _QUICK_CARD_OPTS:
+            st.session_state[_slot] = _val
+        del st.query_params["pick"]
+        st.rerun()
     st.markdown("##### ⚡ クイック判定（自分の手とディーラーを選ぶだけ）")
     st.caption("スマホでも一目。自分の2枚とディーラーのアップカードを選ぶと、"
                "最善手と「なぜ」を即表示します。表を探す必要はありません。")
