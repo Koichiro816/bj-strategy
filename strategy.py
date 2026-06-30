@@ -499,9 +499,11 @@ def generate_strategy_table(rules: HouseRules, tc: float = 0) -> dict:
     table = {"hard": {}, "soft": {}, "pair": {}}
 
     # ハードハンド: 合計5..17（18以上は常にスタンド）
+    # サレンダー可否は best_action 内のEV比較に委ねる（A対面可否・最適性も同所で判定）。
+    # 総合計を14〜16に限定しない理由: H17では「17 vs A」もサレンダーが最適になるため。
     for total in range(5, 18):
         for up in upcards:
-            can_surr = rules.surrender != "none" and total in (14, 15, 16)
+            can_surr = rules.surrender != "none"
             act = best_action(total, soft=False, is_pair=False,
                               dealer_upcard=up, can_double=True,
                               can_split=False, can_surrender=can_surr,

@@ -370,7 +370,7 @@ RULESET_PRESETS = {
         "hr_draw_split_aces": False,
         "hr_max_splits": 3,
         "hr_surrender": "late（レイトサレンダー）",
-        "hr_surrender_vs_ace": False,
+        "hr_surrender_vs_ace": True,   # エース対面でもサレンダー可（実卓確認済）
         "hr_decks_dealt": 6.0,   # 6デッキ全配布(100%)＝CSM
     },
 }
