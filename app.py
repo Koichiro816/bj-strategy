@@ -844,6 +844,20 @@ def _hand_cards_html(*ranks):
             f'margin:4px 0 2px;">{cards}</div>')
 
 
+def _table_view_html(p1, p2, du):
+    """プレイヤー視点の卓レイアウト：ディーラーを上、自分の手札を下に並べる。"""
+    lbl = ('font-size:0.72rem;color:#607D8B;font-weight:700;text-align:center;'
+           'letter-spacing:1px;')
+    return (
+        f'<div style="margin:8px 0 2px;">'
+        f'<div style="{lbl}">ディーラー</div>'
+        f'{_hand_cards_html(du)}'
+        f'<div style="border-top:1px dashed #B0BEC5;width:72%;margin:9px auto;"></div>'
+        f'<div style="{lbl}">あなたの手札</div>'
+        f'{_hand_cards_html(p1, p2)}'
+        f'</div>')
+
+
 def _pills_picker(label, key, default):
     """カードのランクを横並びチップ（st.pills）で選ぶ。ネイティブ部品のため
     セッション状態を保持し、ページ再読み込み（＝ログイン画面復帰）を起こさない。"""
@@ -862,12 +876,8 @@ def render_quick_decision(rules, tc):
     p1 = _pills_picker("自分のカード①", "q_p1", _TEN_DEFAULT)
     p2 = _pills_picker("自分のカード②", "q_p2", "6")
     du = _pills_picker("ディーラーのアップカード", "q_du", _TEN_DEFAULT)
-    # 選んだ手札を本物のカード絵で確認表示
-    st.markdown(
-        '<div style="font-size:0.78rem;color:#607D8B;font-weight:700;'
-        'text-align:center;margin-top:6px;">あなたの手札／ディーラー</div>',
-        unsafe_allow_html=True)
-    st.markdown(_hand_cards_html(p1, p2, du), unsafe_allow_html=True)
+    # 選んだ手札を卓のレイアウト（ディーラー上・自分下）で確認表示
+    st.markdown(_table_view_html(p1, p2, du), unsafe_allow_html=True)
     c1, c2, dup = _opt_rank(p1), _opt_rank(p2), _opt_rank(du)
     t1, s1 = (11, True) if c1 == 11 else (c1, False)
     total, soft = add_card(t1, s1, c2)
