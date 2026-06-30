@@ -436,7 +436,7 @@ st.markdown(
     '<div style="font-weight:800;font-size:0.95rem;margin-bottom:4px;">'
     '📋 使い方は3ステップ</div>'
     '<strong>Step 1.</strong> 下の「⚙️ ハウスルール設定」で、遊ぶ卓の条件を選ぶ'
-    '（ルールが分からなければ「📖 ルールの見分け方」を参照）<br>'
+    '（ルールが分からなければ各項目の「📷 見分け方」ボタンで写真を確認）<br>'
     '<strong>Step 2.</strong> 「ベーシックストラテジー」タブの<strong>⚡クイック判定</strong>で、'
     '自分の2枚とディーラーのカードを選ぶ<br>'
     '<strong>Step 3.</strong> 表示された<strong>最善手</strong>のとおりにプレイ。'
@@ -812,18 +812,34 @@ def _card_name(r: int) -> str:
     return "A" if r == 11 else str(r)
 
 
+def _card_picker(label, key, default):
+    """カードを「タップ」して選ぶピッカー（プルダウンを廃止）。選択中は青く強調。"""
+    if key not in st.session_state:
+        st.session_state[key] = default
+    cur = st.session_state[key]
+    st.markdown(
+        f"<div style='font-size:0.82rem;font-weight:700;color:#37474F;margin:2px 0;'>"
+        f"{label}：<span style='color:#1565C0;font-size:1.0rem;'>{cur}</span></div>",
+        unsafe_allow_html=True)
+    cols = st.columns(10)
+    for i, r in enumerate(_QUICK_CARD_OPTS):
+        with cols[i]:
+            if st.button(r, key=f"{key}_{r}", use_container_width=True,
+                         type="primary" if r == cur else "secondary"):
+                st.session_state[key] = r
+                st.rerun()
+    return st.session_state[key]
+
+
 def render_quick_decision(rules, tc):
     """自分の2枚＋ディーラーのアップカードから最善手と各アクションEVを即表示する。"""
     st.markdown("##### ⚡ クイック判定（自分の手とディーラーを選ぶだけ）")
     st.caption("スマホでも一目。自分の2枚とディーラーのアップカードを選ぶと、"
                "最善手と「なぜ」を即表示します。表を探す必要はありません。")
-    qc1, qc2, qc3 = st.columns(3)
-    with qc1:
-        p1 = st.selectbox("自分のカード①", _QUICK_CARD_OPTS, index=9, key="q_p1")
-    with qc2:
-        p2 = st.selectbox("自分のカード②", _QUICK_CARD_OPTS, index=5, key="q_p2")
-    with qc3:
-        du = st.selectbox("ディーラー", _QUICK_CARD_OPTS, index=9, key="q_du")
+    st.caption("↓ カードをタップして選んでください")
+    p1 = _card_picker("自分のカード①", "q_p1", "10")
+    p2 = _card_picker("自分のカード②", "q_p2", "6")
+    du = _card_picker("ディーラーのアップカード", "q_du", "10")
     c1, c2, dup = _opt_rank(p1), _opt_rank(p2), _opt_rank(du)
     t1, s1 = (11, True) if c1 == 11 else (c1, False)
     total, soft = add_card(t1, s1, c2)
