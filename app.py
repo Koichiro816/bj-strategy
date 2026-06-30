@@ -923,9 +923,10 @@ def render_quick_decision(rules, tc):
     st.caption("スマホでも一目。自分の2枚とディーラーのアップカードを選ぶと、"
                "最善手と「なぜ」を即表示します。表を探す必要はありません。")
     st.caption("↓ ランクをタップして選んでください")
+    # 下の卓表示（ディーラー上・自分下）に合わせ、選択も同じ順に並べる
+    du = _pills_picker("ディーラーのアップカード", "q_du", _TEN_DEFAULT)
     p1 = _pills_picker("自分のカード①", "q_p1", _TEN_DEFAULT)
     p2 = _pills_picker("自分のカード②", "q_p2", "6")
-    du = _pills_picker("ディーラーのアップカード", "q_du", _TEN_DEFAULT)
     # 選んだ手札を卓のレイアウト（ディーラー上・自分下）で確認表示
     st.markdown(_table_view_html(p1, p2, du), unsafe_allow_html=True)
     c1, c2, dup = _opt_rank(p1), _opt_rank(p2), _opt_rank(du)
