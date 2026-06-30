@@ -816,78 +816,85 @@ def _card_name(r: int) -> str:
     return "A" if r == 11 else str(r)
 
 
-# ランクごとに固定のスートを割り当て（赤黒が混じり本物の札らしく見せる。
-# ブラックジャックではスートは無関係なので見た目専用）。
-_CARD_SUIT = {
-    "2": "♠", "3": "♥", "4": "♦", "5": "♣", "6": "♠", "7": "♥",
-    "8": "♦", "9": "♣", "10": "♠", "J": "♥", "Q": "♦", "K": "♣", "A": "♠",
-}
+# 絵札（J/Q/K）の中央モチーフ。実トランプの宮廷図に対応する単色グリフ。
+_COURT_GLYPH = {"J": "♞", "Q": "♛", "K": "♚"}
 
 
-def _mini_card_html(rank, selected, href):
-    """本物のトランプ風ミニカード（左上＋右下に角インデックス、中央に大きなスート）。
-    タップで選択。ブラックジャックではスートは無関係なため見た目専用。"""
-    suit = _CARD_SUIT.get(rank, "♠")
-    col = "#C62828" if suit in ("♥", "♦") else "#111"
-    ring = (";box-shadow:0 0 0 3px #1565C0;transform:translateY(-2px);"
-            if selected
-            else ";box-shadow:0 1px 3px rgba(0,0,0,.30);")
-    # 角インデックス（ランク＋スートを縦に小さく）。"10"は幅広なので少し小さく。
-    rsz = 11 if rank == "10" else 13
-    idx = (f'<span style="font-size:{rsz}px;font-weight:800;line-height:1;">{rank}</span>'
-           f'<span style="font-size:9px;line-height:1;">{suit}</span>')
+def _pip_card_html(rank):
+    """本物のトランプ顔を描画する。スートはスペード1種。
+    数札は枚数ぶんのスペードを並べ、絵札は宮廷図、Aは中央に大きな1枚。
+    角インデックスは左上のみ（上下反転の下側数字は表示しない）。"""
+    W, H = 60, 84
+    # 左上インデックス（ランク＋スペード）。"10"は幅広なので少し小さく。
+    rsz = 13 if rank == "10" else 16
+    idx = (f'<div style="position:absolute;top:3px;left:4px;display:flex;'
+           f'flex-direction:column;align-items:center;line-height:1;color:#111;">'
+           f'<span style="font-size:{rsz}px;font-weight:800;">{rank}</span>'
+           f'<span style="font-size:11px;">♠</span></div>')
+
+    if rank == "A":
+        body = ('<span style="position:absolute;top:50%;left:50%;'
+                'transform:translate(-50%,-50%);font-size:38px;color:#111;">♠</span>')
+    elif rank in _COURT_GLYPH:
+        # 絵札：二重枠＋中央に宮廷図グリフ（単色で確実に描画）。
+        body = (
+            f'<div style="position:absolute;top:18px;left:8px;right:8px;bottom:18px;'
+            f'border:1.5px solid #B8932F;border-radius:3px;'
+            f'display:flex;align-items:center;justify-content:center;'
+            f'background:linear-gradient(135deg,#fffdf5,#f3ead0);">'
+            f'<span style="font-size:30px;color:#111;">{_COURT_GLYPH[rank]}</span></div>')
+    else:
+        # 数札：枚数ぶんのスペードを2列グリッドで中央に。奇数の最後は中央寄せ。
+        n = int(rank)
+        psz = 17 if n <= 6 else (14 if n <= 8 else 12)
+        cells = []
+        for i in range(n):
+            span = ';grid-column:1 / 3;' if (n % 2 == 1 and i == n - 1) else ''
+            cells.append(f'<span style="{span}">♠</span>')
+        body = (
+            f'<div style="position:absolute;top:16px;left:9px;right:9px;bottom:16px;'
+            f'display:grid;grid-template-columns:1fr 1fr;align-content:center;'
+            f'justify-items:center;gap:0 2px;font-size:{psz}px;color:#111;'
+            f'line-height:1.0;">{"".join(cells)}</div>')
+
     return (
-        f'<a href="{href}" target="_self" style="text-decoration:none;flex:0 0 auto;">'
-        f'<div style="width:40px;height:56px;border:1px solid #9e9e9e;border-radius:6px;'
-        f'background:linear-gradient(180deg,#fff 0%,#f4f4f4 100%);position:relative;'
-        f'color:{col};transition:all .08s{ring}">'
-        # 左上インデックス
-        f'<div style="position:absolute;top:2px;left:3px;display:flex;flex-direction:column;'
-        f'align-items:center;">{idx}</div>'
-        # 中央の大きなスート
-        f'<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'
-        f'font-size:22px;opacity:.92;">{suit}</span>'
-        # 右下インデックス（180°回転で対称）
-        f'<div style="position:absolute;bottom:2px;right:3px;display:flex;'
-        f'flex-direction:column;align-items:center;transform:rotate(180deg);">{idx}</div>'
-        f'</div></a>')
+        f'<div style="width:{W}px;height:{H}px;border:1px solid #9e9e9e;border-radius:7px;'
+        f'background:linear-gradient(180deg,#fff 0%,#f6f6f6 100%);position:relative;'
+        f'box-shadow:0 1px 4px rgba(0,0,0,.28);flex:0 0 auto;">{idx}{body}</div>')
 
 
-def _card_picker(label, key, default):
-    """カードを横一列の小さな絵で並べ、タップで選ぶ（スマホでも横並び・横スクロール）。"""
+def _hand_cards_html(*ranks):
+    """選んだランク群を本物のカード絵として横並びで描画する。"""
+    cards = "".join(_pip_card_html(r) for r in ranks)
+    return (f'<div style="display:flex;gap:8px;justify-content:center;'
+            f'margin:4px 0 2px;">{cards}</div>')
+
+
+def _pills_picker(label, key, default):
+    """カードのランクを横並びチップ（st.pills）で選ぶ。ネイティブ部品のため
+    セッション状態を保持し、ページ再読み込み（＝ログイン画面復帰）を起こさない。"""
     if key not in st.session_state:
         st.session_state[key] = default
-    cur = st.session_state[key]
-    st.markdown(
-        f"<div style='font-size:0.82rem;font-weight:700;color:#37474F;margin:6px 0 2px;'>"
-        f"{label}：<span style='color:#1565C0;'>{cur}</span></div>",
-        unsafe_allow_html=True)
-    cards = "".join(
-        _mini_card_html(r, r == cur, f"?pick={key}:{r}") for r in _QUICK_CARD_OPTS)
-    st.markdown(
-        f'<div style="display:flex;gap:5px;overflow-x:auto;padding:3px 0 6px;'
-        f'-webkit-overflow-scrolling:touch;">{cards}</div>',
-        unsafe_allow_html=True)
-    return st.session_state[key]
+    st.pills(label, _QUICK_CARD_OPTS, selection_mode="single",
+             key=key, format_func=lambda r: f"{r} ♠")
+    return st.session_state[key] or default
 
 
 def render_quick_decision(rules, tc):
     """自分の2枚＋ディーラーのアップカードから最善手と各アクションEVを即表示する。"""
-    # カードの絵をタップ→ ?pick=slot:rank で選択を反映
-    _pick = st.query_params.get("pick")
-    if _pick and ":" in _pick:
-        _slot, _val = _pick.split(":", 1)
-        if _slot in ("q_p1", "q_p2", "q_du") and _val in _QUICK_CARD_OPTS:
-            st.session_state[_slot] = _val
-        del st.query_params["pick"]
-        st.rerun()
     st.markdown("##### ⚡ クイック判定（自分の手とディーラーを選ぶだけ）")
     st.caption("スマホでも一目。自分の2枚とディーラーのアップカードを選ぶと、"
                "最善手と「なぜ」を即表示します。表を探す必要はありません。")
-    st.caption("↓ カードをタップして選んでください")
-    p1 = _card_picker("自分のカード①", "q_p1", "10")
-    p2 = _card_picker("自分のカード②", "q_p2", "6")
-    du = _card_picker("ディーラーのアップカード", "q_du", "10")
+    st.caption("↓ ランクをタップして選んでください")
+    p1 = _pills_picker("自分のカード①", "q_p1", "10")
+    p2 = _pills_picker("自分のカード②", "q_p2", "6")
+    du = _pills_picker("ディーラーのアップカード", "q_du", "10")
+    # 選んだ手札を本物のカード絵で確認表示
+    st.markdown(
+        '<div style="font-size:0.78rem;color:#607D8B;font-weight:700;'
+        'text-align:center;margin-top:6px;">あなたの手札／ディーラー</div>',
+        unsafe_allow_html=True)
+    st.markdown(_hand_cards_html(p1, p2, du), unsafe_allow_html=True)
     c1, c2, dup = _opt_rank(p1), _opt_rank(p2), _opt_rank(du)
     t1, s1 = (11, True) if c1 == 11 else (c1, False)
     total, soft = add_card(t1, s1, c2)
