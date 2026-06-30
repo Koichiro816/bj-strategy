@@ -869,15 +869,21 @@ def _pills_picker(label, key, default):
 
 
 def _dealer_strength_phrase(dup):
-    """ディーラーのアップカードの強さを初心者向けの言葉にする。"""
+    """ディーラーのアップカードの強さを初心者向けの言葉にする。
+    自滅（バースト）しやすさの実勢：6≧5＞4＞3＞2 ＞ 7＞8＞9＞10＞A。
+    6が最も弱く、Aが最も強い。"""
     name = _card_name(dup)
-    if dup in (4, 5, 6):
-        return f"ディーラーの{name}は最も弱く、自分でバーストしやすい"
+    if dup == 6:
+        return f"ディーラーの{name}は最も自滅（バースト）しやすい、いちばん弱いアップカード"
+    if dup == 5:
+        return f"ディーラーの{name}は6に次いでバーストしやすい弱いアップカード"
+    if dup == 4:
+        return f"ディーラーの{name}はバーストしやすい弱めのアップカード"
     if dup in (2, 3):
-        return f"ディーラーの{name}は弱め"
+        return f"ディーラーの{name}はやや弱いアップカード"
     if dup in (7, 8):
-        return f"ディーラーの{name}はやや強い"
-    return f"ディーラーの{name}は強い"  # 9,10,A
+        return f"ディーラーの{name}はやや強いアップカード"
+    return f"ディーラーの{name}は強いアップカード"  # 9,10,A
 
 
 def _plain_reason(best, total, soft, pair_rank, dup, evs):
@@ -904,9 +910,14 @@ def _plain_reason(best, total, soft, pair_rank, dup, evs):
         return (f"{dlr}。{why}、勝ちやすい場面です。賭けを2倍にして1枚だけ引いて"
                 f"勝負します（ダブルダウン）。{tail}")
     if best == "S":
-        if total >= 17:
-            return (f"合計 {total} は十分高く、ここで引くとバーストの危険が大きいので止めます"
+        if total >= 19:
+            return (f"合計 {total} はそれ自体が十分に強い手です。引く必要はなく、"
+                    "引けばバーストの危険が増えるだけなので止めます"
                     "（スタンド）。あとはディーラーの結果を待ちます。")
+        if total >= 17:
+            return (f"合計 {total} は強い手ではありませんが、ここから1枚引くとバースト"
+                    "しやすく、引いても勝率は上がりません。だから損を避けるためにあえて"
+                    "引かず止めます（スタンド）。あとはディーラーの結果を待ちます。")
         return (f"{dlr}。あなたの {total} は引くとバーストしやすい手ですが、"
                 f"弱いディーラーが自滅（バースト）するのを待つ方が得なので止めます"
                 f"（スタンド）。{tail}")
