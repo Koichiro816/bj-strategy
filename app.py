@@ -529,6 +529,42 @@ def _persist_onb_choice():
         pass
 
 
+def _rules_summary(preset):
+    """ハウスルール辞書(hr_*キー)を短い1行の要約にする（お店の横に表示）。"""
+    g = preset.get
+    decks = g("hr_num_decks", 6)
+    bj = str(g("hr_bj_pay", ""))
+    pay = "3:2" if bj.startswith("3:2") else ("6:5" if bj.startswith("6:5") else "?")
+    s17 = "S17" if str(g("hr_soft17", "")).startswith("S17") else "H17"
+    hc = str(g("hr_hole_card", ""))
+    hcs = ("US" if hc.startswith("HC")
+           else "欧ENHC" if hc.startswith("ENHC")
+           else "豪ANHC" if hc.startswith("ANHC") else "")
+    dbl_raw = str(g("hr_double", ""))
+    dbl = "ダブル自由" if dbl_raw.startswith("any") else f"ダブル{dbl_raw.split('（')[0]}"
+    das = "DAS可" if g("hr_das") else "DAS不可"
+    surr_raw = str(g("hr_surrender", ""))
+    if surr_raw.startswith("early"):
+        surr = "アーリーサレンダー"
+    elif surr_raw.startswith("late"):
+        surr = "レイトサレンダー"
+    else:
+        surr = "サレンダー無"
+    if surr_raw and not surr_raw.startswith("none") and g("hr_surrender_vs_ace"):
+        surr += "(A可)"
+    parts = [f"{decks}D", pay, s17] + ([hcs] if hcs else []) + [dbl, das, surr]
+    return "・".join(parts)
+
+
+def _onb_label(name):
+    """お店ラジオの表示ラベル：『店名 ｜ ルール要約』。"""
+    if name == _ONB_STANDARD:
+        return f"{name}　🃏 {_rules_summary(_HR_DEFAULTS)}"
+    preset = (RULESET_PRESETS.get(name)
+              or st.session_state.get("user_presets", {}).get(name, {}))
+    return f"{name}　🃏 {_rules_summary(preset)}"
+
+
 _GUIDE_IMG_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "assets", "guide")
 
@@ -584,6 +620,7 @@ st.radio(
     _onb_options,
     key="onb_ruleset",
     on_change=_on_onb_change,
+    format_func=_onb_label,
 )
 # 選択が変わったら Cookie に記憶（次回のデフォルトにする）。コールバック外の
 # 本体で行うことでコンポーネント描画が可能。直後に st.rerun() しない。
