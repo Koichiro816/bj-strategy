@@ -529,40 +529,47 @@ def _persist_onb_choice():
         pass
 
 
-def _rules_summary(preset):
-    """ハウスルール辞書(hr_*キー)を短い1行の要約にする（お店の横に表示）。"""
+def _preset_to_rules(preset):
+    """ハウスルール辞書(hr_*キー)を HouseRules に変換する（ハウスエッジ計算用）。"""
     g = preset.get
-    decks = g("hr_num_decks", 6)
     bj = str(g("hr_bj_pay", ""))
-    pay = "3:2" if bj.startswith("3:2") else ("6:5" if bj.startswith("6:5") else "?")
-    s17 = "S17" if str(g("hr_soft17", "")).startswith("S17") else "H17"
     hc = str(g("hr_hole_card", ""))
-    hcs = ("US" if hc.startswith("HC")
-           else "欧ENHC" if hc.startswith("ENHC")
-           else "豪ANHC" if hc.startswith("ANHC") else "")
-    dbl_raw = str(g("hr_double", ""))
-    dbl = "ダブル自由" if dbl_raw.startswith("any") else f"ダブル{dbl_raw.split('（')[0]}"
-    das = "DAS可" if g("hr_das") else "DAS不可"
-    surr_raw = str(g("hr_surrender", ""))
-    if surr_raw.startswith("early"):
-        surr = "アーリーサレンダー"
-    elif surr_raw.startswith("late"):
-        surr = "レイトサレンダー"
-    else:
-        surr = "サレンダー無"
-    if surr_raw and not surr_raw.startswith("none") and g("hr_surrender_vs_ace"):
-        surr += "(A可)"
-    parts = [f"{decks}D", pay, s17] + ([hcs] if hcs else []) + [dbl, das, surr]
-    return "・".join(parts)
+    num_decks = int(g("hr_num_decks", 6))
+    dd = g("hr_decks_dealt")
+    penetration = (dd / num_decks) if dd else 0.75  # HEには影響しないが整合のため
+    return HouseRules(
+        num_decks=num_decks,
+        blackjack_pays=1.5 if bj.startswith("3:2") else 1.2,
+        soft17="S17" if str(g("hr_soft17", "")).startswith("S17") else "H17",
+        double_allowed=str(g("hr_double", "any")).split("（")[0].strip() or "any",
+        double_after_split=bool(g("hr_das", True)),
+        split_aces=bool(g("hr_split_aces", True)),
+        draw_to_split_aces=bool(g("hr_draw_split_aces", False)),
+        max_splits=int(g("hr_max_splits", 3)),
+        surrender=str(g("hr_surrender", "late")).split("（")[0].strip() or "none",
+        surrender_vs_ace=bool(g("hr_surrender_vs_ace", False)),
+        penetration=penetration,
+        dealer_peeks=not hc.startswith("ENHC"),
+    )
+
+
+def _preset_house_edge(preset):
+    """プリセットのハウスエッジ(%)を返す。計算不能なら None。"""
+    try:
+        return house_edge_wizard(_preset_to_rules(preset))
+    except Exception:
+        return None
 
 
 def _onb_label(name):
-    """お店ラジオの表示ラベル：『店名 ｜ ルール要約』。"""
-    if name == _ONB_STANDARD:
-        return f"{name}　🃏 {_rules_summary(_HR_DEFAULTS)}"
-    preset = (RULESET_PRESETS.get(name)
-              or st.session_state.get("user_presets", {}).get(name, {}))
-    return f"{name}　🃏 {_rules_summary(preset)}"
+    """お店ラジオの表示ラベル：『店名 ｜ ハウスエッジ』。"""
+    preset = (_HR_DEFAULTS if name == _ONB_STANDARD
+              else (RULESET_PRESETS.get(name)
+                    or st.session_state.get("user_presets", {}).get(name, {})))
+    he = _preset_house_edge(preset)
+    if he is None:
+        return name
+    return f"{name}　🎰 ハウスエッジ {he:.2f}%"
 
 
 _GUIDE_IMG_DIR = os.path.join(
