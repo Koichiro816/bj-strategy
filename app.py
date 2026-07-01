@@ -568,12 +568,19 @@ def _apply_ruleset():
 
     既定プリセット(RULESET_PRESETS)とユーザー保存プリセット(user_presets)の両方を探す。
     """
+    # ユーザーが詳細パネルのプリセットを手動で選んだ印（以後は自動同期しない）
+    st.session_state["_hr_touched"] = True
     name = st.session_state.get("hr_ruleset")
     preset = (RULESET_PRESETS.get(name)
               or st.session_state.get("user_presets", {}).get(name))
     if preset:
         for _key, _val in preset.items():
             st.session_state[_key] = _val
+    # 上の「お店」選択も矛盾なく揃える（プリセット名→同名／カスタム→標準）
+    if name in RULESET_PRESETS or name in st.session_state.get("user_presets", {}):
+        st.session_state["onb_ruleset"] = name
+    else:  # カスタム（手動設定）
+        st.session_state["onb_ruleset"] = _ONB_STANDARD
 
 
 # はじめての方向けオンボーディング：お店を選ぶ1問だけでルールを自動セット
@@ -609,8 +616,10 @@ def _read_onb_choice():
 
 
 def _on_onb_change():
-    """お店ラジオをユーザーが操作したら、操作済みフラグを立ててルールを適用。"""
+    """お店ラジオをユーザーが操作したら、操作済みフラグを立ててルールを適用。
+    お店を選び直したら詳細パネルの手動フラグは解除し、再び自動同期させる。"""
     st.session_state["_onb_touched"] = True
+    st.session_state["_hr_touched"] = False
     _apply_onboarding()
 
 
@@ -740,6 +749,23 @@ else:
     st.caption("✅ 「" + st.session_state["onb_ruleset"] + "」のルールを自動セットしました。"
                "次回もこの選択が記憶され、最初から選ばれた状態で開きます。"
                "卓ごとの違いを微調整したいときだけ、下の「⚙️ ハウスルール設定」を開いてください。")
+
+# 詳細パネルのプリセット選択を「お店」選択に同期する安全網（ラジオ生成前に実行）。
+# モバイルのCookieハイドレーション競合等で片方だけ同期に失敗しても、ここで必ず
+# 一致させる。ユーザーが詳細パネルのプリセットを手動で選んだ場合(_hr_touched)は尊重。
+if not st.session_state.get("_hr_touched"):
+    _onb_now = st.session_state.get("onb_ruleset", _ONB_STANDARD)
+    _hr_target = (_onb_now if (_onb_now in RULESET_PRESETS
+                               or _onb_now in st.session_state["user_presets"])
+                  else "カスタム（手動設定）")
+    if st.session_state.get("hr_ruleset") != _hr_target:
+        st.session_state["hr_ruleset"] = _hr_target
+        # ラベルだけでなく実ルールも揃える（プリセットのとき）
+        _hp = (RULESET_PRESETS.get(_hr_target)
+               or st.session_state["user_presets"].get(_hr_target))
+        if _hp:
+            for _hk, _hv in _hp.items():
+                st.session_state[_hk] = _hv
 
 with st.expander("⚙️  ハウスルール設定（クリックで展開）", expanded=False):
     if st.session_state.pop("_preset_saved_flag", None):
