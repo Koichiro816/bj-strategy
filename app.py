@@ -414,12 +414,14 @@ _PRESET_COOKIE = "bj_user_presets"
 _cookie_manager = stx.CookieManager(key="bj_cookie_mgr") if stx is not None else None
 
 
-def _read_presets_cookie():
-    """保存済みプリセット辞書を復元する（無ければ空辞書）。
-    起動時のHTTPリクエストに第一者Cookieが乗るため、サーバー側で直接読める。"""
-    raw = None
+def _cookie_presets():
+    """CookieManager が保持するプリセット辞書を返す（無ければ空辞書）。
+    CookieManager.__init__ が getAll 済みで、フロント側のハイドレーション後の
+    再実行で実際の値が入る。読み取りはライブラリ自身の get を使う。"""
+    if _cookie_manager is None:
+        return {}
     try:
-        raw = st.context.cookies.get(_PRESET_COOKIE)
+        raw = _cookie_manager.get(_PRESET_COOKIE)
     except Exception:
         raw = None
     if not raw:
@@ -432,8 +434,14 @@ def _read_presets_cookie():
 
 
 if "user_presets" not in st.session_state:
-    # 初回ロード時、ブラウザが送ってきた第一者 Cookie から復元
-    st.session_state["user_presets"] = _read_presets_cookie()
+    st.session_state["user_presets"] = {}
+
+# Cookie からの復元。ハイドレーション後の再実行で値が届くため、セッションが
+# 空のあいだは毎回読みにいく（保存済みの内容は上書きしない）。
+if not st.session_state["user_presets"]:
+    _restored = _cookie_presets()
+    if _restored:
+        st.session_state["user_presets"] = _restored
 
 
 def _persist_user_presets():
