@@ -604,8 +604,11 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
         surrender_vs_ace_ui = st.checkbox(
             "エース対面でのサレンダー可", key="hr_surrender_vs_ace",
             help="ディーラーのアップカードがA（エース）のときもサレンダーできるか。")
-        _pen_min = float(max(1, num_decks // 2))
         _pen_max = float(num_decks)   # 最大=全デッキ配布(100%)＝CSM相当
+        _pen_min = float(max(1, num_decks // 2))
+        # 1デッキ卓では min==max になりスライダーが例外を出すため、必ず min<max を保証
+        if _pen_min >= _pen_max:
+            _pen_min = _pen_max - 0.5
         # decks_dealt は num_decks に依存。session_state値を範囲にクランプしてから使う
         _dd = st.session_state.get("hr_decks_dealt")
         if _dd is None:
