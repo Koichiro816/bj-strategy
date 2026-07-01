@@ -6,15 +6,12 @@ import json
 import os
 import random
 import tempfile
+from urllib.parse import quote, unquote
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-
-try:
-    from streamlit_local_storage import LocalStorage
-except Exception:  # 依存が無い環境でもアプリ本体は動くようにする
-    LocalStorage = None
+import streamlit.components.v1 as components
 
 from rules import HouseRules
 from strategy import (generate_strategy_table, generate_ev_table, stand_breakdown,
@@ -402,39 +399,48 @@ for _k, _v in _HR_DEFAULTS.items():
         st.session_state[_k] = _v
 
 # ユーザーが自分で保存したカスタムプリセット。
-# ブラウザの localStorage に保存し、再起動・再訪でも各自の端末に残す。
-_LS_PRESET_KEY = "bj_user_presets"
-_localS = LocalStorage() if LocalStorage is not None else None
+# ブラウザの Cookie に保存し、再起動・再訪でも各自の端末（同一ブラウザ）に残す。
+# Cookie は st.context.cookies でサーバー側から読めるため、追加コンポーネントの
+# 往復やページ再読み込みが不要で、ウィジェット状態を乱さない（安定）。
+_PRESET_COOKIE = "bj_user_presets"
+
+
+def _read_presets_cookie():
+    """Cookie から保存済みプリセット辞書を復元する（無ければ空辞書）。"""
+    try:
+        raw = st.context.cookies.get(_PRESET_COOKIE)
+    except Exception:
+        raw = None
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(unquote(raw))
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
 
 if "user_presets" not in st.session_state:
-    st.session_state["user_presets"] = {}
-
-# localStorage からの復元（コンポーネントのハイドレーション後の再実行で値が届く）。
-# セッション側が空のときだけ取り込み、保存直後の内容を上書きしない。
-if _localS is not None and not st.session_state["user_presets"]:
-    try:
-        _stored = _localS.getItem(_LS_PRESET_KEY)
-        if _stored:
-            _parsed = json.loads(_stored)
-            if isinstance(_parsed, dict):
-                st.session_state["user_presets"] = _parsed
-    except Exception:
-        pass
+    # 初回ロード時、ブラウザが送ってきた Cookie から復元
+    st.session_state["user_presets"] = _read_presets_cookie()
 
 
 def _persist_user_presets():
-    """現在の自分用プリセット一覧を localStorage へ書き出す。"""
-    if _localS is None:
-        return
-    try:
-        _localS.setItem(
-            _LS_PRESET_KEY,
-            json.dumps(st.session_state["user_presets"], ensure_ascii=False),
-            key="ls_save_presets",
-        )
-    except Exception:
-        pass
+    """現在の自分用プリセット一覧を Cookie に書き出す（1年間有効）。
+    毎回スクリプト冒頭でも呼ばれるため、保存直後の st.rerun() でも取りこぼさない。"""
+    payload = quote(json.dumps(st.session_state.get("user_presets", {}),
+                               ensure_ascii=False))
+    components.html(
+        f"""<script>
+        document.cookie = "{_PRESET_COOKIE}=" + "{payload}" +
+            ";max-age=31536000;path=/;SameSite=Lax";
+        </script>""",
+        height=0,
+    )
 
+
+# 毎回、現在のプリセットを Cookie に反映（保存/削除→rerun でも確実に永続化）
+_persist_user_presets()
 
 # プリセット保存時に集めるハウスルールのキー一覧
 _HR_KEYS = list(_HR_DEFAULTS.keys())
@@ -653,7 +659,7 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
             else:
                 st.session_state["user_presets"][_nm] = {
                     _key: st.session_state[_key] for _key in _HR_KEYS}
-                _persist_user_presets()
+                # 冒頭の _persist_user_presets() が rerun 後に Cookie へ確実に反映する
                 st.session_state["_preset_saved_flag"] = True
                 st.rerun()
     with _ps2:
@@ -663,7 +669,6 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
                 "保存済みを削除", ["（選択）"] + _user_names, key="hr_preset_del")
             if st.button("選択を削除", width='stretch') and _del in _user_names:
                 del st.session_state["user_presets"][_del]
-                _persist_user_presets()
                 if st.session_state.get("hr_ruleset") == _del:
                     st.session_state["hr_ruleset"] = "カスタム（手動設定）"
                 st.rerun()
