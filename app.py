@@ -1065,8 +1065,11 @@ def _pills_picker_optional(label, key):
 
 def _reset_quick_hand():
     """クイック判定のカード入力を全て消して空欄に戻す（on_click コールバック）。
-    ウィジェット生成前に実行されるため、pop が安全に効く。"""
-    for k in ["q_du", "q_p1", "q_p2"] + [f"q_p{i}" for i in range(3, 12)]:
+    ウィジェット生成前に実行されるため、pop が安全に効く。スプリット各手も消す。"""
+    keys = (["q_du", "q_p1", "q_p2"] + [f"q_p{i}" for i in range(3, 12)]
+            + [f"q_spa_{i}" for i in range(2, 12)]
+            + [f"q_spb_{i}" for i in range(2, 12)])
+    for k in keys:
         st.session_state.pop(k, None)
 
 
@@ -1131,6 +1134,140 @@ def _plain_reason(best, total, soft, pair_rank, dup, evs):
             f"（ヒット）。弱い手のまま止める方が、バーストより危険な場面です。{tail}")
 
 
+def _hl_prompt(text):
+    """次に操作すべき箇所を目立たせる案内バナー（ユーザー誘導用）。"""
+    st.markdown(
+        f'<div style="background:#FFF3E0;border:2px solid #FB8C00;border-radius:10px;'
+        f'padding:10px 14px;margin:8px 0 2px;font-weight:700;color:#E65100;'
+        f'font-size:0.95rem;">{text}</div>', unsafe_allow_html=True)
+
+
+def _action_card(best, hand_desc, dup):
+    """最善手の大きな色付きカードを描画する。"""
+    bg = CELL_COLORS.get(best, "#ECEFF1")
+    fg = CELL_TEXT.get(best, "#37474F")
+    st.markdown(
+        f'<div style="background:{bg};border-radius:12px;padding:14px 18px;'
+        f'text-align:center;margin:6px 0;">'
+        f'<div style="font-size:0.8rem;color:{fg};opacity:0.85;font-weight:600;">'
+        f'あなたの手: {hand_desc} ／ ディーラー {_card_name(dup)}</div>'
+        f'<div style="font-size:2.0rem;font-weight:800;color:{fg};line-height:1.25;">'
+        f'{_ACTION_NAMES[best]}</div>'
+        f'<div style="font-size:0.9rem;color:{fg};font-weight:700;">（{best}）</div>'
+        f'</div>', unsafe_allow_html=True)
+
+
+def _reco_details(best, evs, total, soft, pair_rank, dup, tc, rules):
+    """推奨の理由・EV・詳細expander・スタンド内訳をまとめて描画する。"""
+    best_ev = evs.get(best)
+    if best_ev is not None:
+        ev_col = "#1B5E20" if best_ev >= 0 else "#B71C1C"
+        st.markdown(
+            f'<div style="background:#F1F8E9;border-left:4px solid #7CB342;'
+            f'border-radius:6px;padding:10px 14px;margin:2px 0 8px;font-size:0.9rem;'
+            f'line-height:1.65;color:#33401F;">💡 '
+            f'{_plain_reason(best, total, soft, pair_rank, dup, evs)}'
+            f'<div style="margin-top:6px;font-size:0.85rem;color:#455A64;">'
+            f'この選択の期待値（EV）＝ <strong style="color:{ev_col};">{best_ev:+.3f}</strong>'
+            f'（賭け金1単位あたり。プラスなら有利、マイナスなら最も損失の小さい手）</div></div>',
+            unsafe_allow_html=True)
+    with st.expander("📐 もっと詳しく（各アクションの期待値を数字で比較）", expanded=False):
+        parts = []
+        for act, ev in sorted(evs.items(), key=lambda x: -x[1]):
+            abg = CELL_COLORS.get(act, "#ECEFF1")
+            afg = CELL_TEXT.get(act, "#37474F")
+            mark = ' <strong style="color:#1565C0;">← 最善</strong>' if act == best else ""
+            parts.append(
+                f'<div style="display:flex;align-items:center;gap:10px;margin:5px 0;">'
+                f'<span style="min-width:104px;background:{abg};color:{afg};'
+                f'padding:3px 10px;border-radius:5px;font-weight:700;font-size:0.85rem;'
+                f'text-align:center;">{_ACTION_NAMES[act]}</span>'
+                f'<span style="font-weight:700;color:{"#1B5E20" if ev >= 0 else "#B71C1C"};">'
+                f'{ev:+.3f}</span>{mark}</div>')
+        st.markdown("".join(parts), unsafe_allow_html=True)
+        st.caption("EV＝賭け金1単位あたりの期待値。最も高いアクションが最善手です。"
+                   "（マイナスでも、より損失の小さい手を選ぶのが最善になります）")
+    if total >= 12 and total <= 21:
+        bd = stand_breakdown(total, dup, rules, tc=tc)
+        st.caption(
+            f"参考・スタンドした場合: 勝ち {bd['win'] * 100:.0f}% ／ "
+            f"引分 {bd['push'] * 100:.0f}% ／ 負け {bd['lose'] * 100:.0f}%")
+
+
+def _split_action_badge(best, total, hand_desc):
+    """スプリット各ハンド用のコンパクトなアクション表示。"""
+    if best == "BUST":
+        bg, fg, name = "#FFEBEE", "#B71C1C", f"バースト（{total}）💥"
+    else:
+        bg = CELL_COLORS.get(best, "#ECEFF1")
+        fg = CELL_TEXT.get(best, "#37474F")
+        name = _ACTION_NAMES.get(best, best)
+    return (
+        f'<div style="background:{bg};border-radius:10px;padding:8px 12px;'
+        f'text-align:center;margin:2px 0 6px;">'
+        f'<div style="font-size:0.72rem;color:{fg};opacity:.85;font-weight:600;">'
+        f'{hand_desc}</div>'
+        f'<div style="font-size:1.3rem;font-weight:800;color:{fg};">{name}</div></div>')
+
+
+def _play_split_hand(title, prefix, pair_opt, du, dup, rules, tc):
+    """スプリットした1つの手をプレイアウトする（2枚目入力→段階的ヒット）。"""
+    st.markdown(f"**{title}**（{_card_name(_opt_rank(pair_opt))} からスタート）")
+    picks = [pair_opt]
+    aces = _opt_rank(pair_opt) == 11
+    one_card_only = aces and not rules.draw_to_split_aces
+    best, evs, total, soft, awaiting = "S", {}, 0, False, False
+    while True:
+        n = len(picks)
+        total, soft = _hand_total_soft(picks)
+        if n < 2:
+            _hl_prompt(f"👇 {title}に配られた2枚目のカードを選んでください")
+            nxt = _pills_picker_optional(
+                f"{title}・カード②（配られた札）", f"{prefix}_{n + 1}")
+            if nxt is None:
+                awaiting = True
+                break
+            picks.append(nxt)
+            continue
+        if total > 21:
+            best = "BUST"
+            break
+        if one_card_only:  # スプリットしたエースは1枚のみ（引き足し不可）
+            best = "S"
+            evs = {}
+            break
+        _, evsf = evaluate_hand(total, soft, False, dup, rules, tc=tc)
+        evs = {"S": evsf["S"], "H": evsf["H"]}
+        if n == 2 and rules.double_after_split and "D" in evsf:
+            evs["D"] = evsf["D"]
+        best = max(evs, key=evs.get)
+        if best == "H" and total < 21 and n < 11:
+            nk = f"{prefix}_{n + 1}"
+            if st.session_state.get(nk) not in _QUICK_CARD_OPTS:
+                _hl_prompt(f"👇 {title}でヒット！引いたカードを選んでください")
+            nxt = _pills_picker_optional(
+                f"{title}・カード{_maru(n + 1)}（引いた札）", nk)
+            if nxt is None:
+                awaiting = True
+                break
+            picks.append(nxt)
+            continue
+        break
+
+    st.markdown(_hand_cards_html(*picks), unsafe_allow_html=True)
+    if awaiting:
+        return
+    names = ",".join(_card_name(_opt_rank(p)) for p in picks)
+    kind = "ソフト" if soft else "ハード"
+    hd = f"{names} = {kind}{total}"
+    st.markdown(_split_action_badge(best, total, hd), unsafe_allow_html=True)
+    if best == "D":
+        st.caption("ダブルダウン：もう1枚だけ引いて賭け金を倍に（この手はここで完了）。")
+    elif one_card_only:
+        st.caption("スプリットしたエースは1枚ずつしか引けないルールのため、"
+                   "ここでスタンドです。")
+
+
 def render_quick_decision(rules, tc):
     """自分の2枚＋ディーラーのアップカードから最善手と各アクションEVを即表示する。"""
     st.markdown("##### ⚡ クイック判定（自分の手とディーラーを選ぶだけ）")
@@ -1145,8 +1282,11 @@ def render_quick_decision(rules, tc):
 
     # リセット（選択があるときだけ表示）。全カードを空欄に戻す。
     _extra_keys = [f"q_p{i}" for i in range(3, 12)]
-    _any_selected = any(st.session_state.get(k) in _QUICK_CARD_OPTS
-                        for k in ["q_du", "q_p1", "q_p2"] + _extra_keys)
+    _split_keys = ([f"q_spa_{i}" for i in range(2, 12)]
+                   + [f"q_spb_{i}" for i in range(2, 12)])
+    _any_selected = any(
+        st.session_state.get(k) in _QUICK_CARD_OPTS
+        for k in ["q_du", "q_p1", "q_p2"] + _extra_keys + _split_keys)
     if _any_selected:
         st.button("🔄 リセット（カードを全て消す）", key="q_reset",
                   on_click=_reset_quick_hand)
@@ -1163,6 +1303,21 @@ def render_quick_decision(rules, tc):
     is_pair = (c1 == c2)
     is_bj = (c1 == 11 and c2 == 10) or (c1 == 10 and c2 == 11)
 
+    # ── インシュランス（ディーラーがA のときだけ・最善手の近くに表示）──
+    if dup == 11:
+        _ins_thr = get_insurance_threshold()
+        _thr_txt = f"+{_ins_thr}" if _ins_thr is not None else "—"
+        if should_take_insurance(tc):
+            st.markdown(
+                '<div style="background:#E3F2FD;border:2px solid #1E88E5;'
+                'border-radius:10px;padding:10px 14px;margin:6px 0;font-weight:700;'
+                f'color:#0D47A1;font-size:0.95rem;">🛡️ インシュランス推奨：TC {tc:+d}'
+                f'（≥ {_thr_txt}）。ディーラーがAなので、まず保険（インシュランス）を取り、'
+                'その後に下の最善手をプレイします。</div>', unsafe_allow_html=True)
+        else:
+            st.caption(f"🛡️ インシュランス：不要（TC {tc:+d} ＜ {_thr_txt}）。"
+                       "ディーラーがAでも、カウントが十分高くない限り保険は取りません。")
+
     if is_bj:
         st.markdown(_table_view_html([p1, p2], du), unsafe_allow_html=True)
         pay = "3:2（1.5倍）" if rules.blackjack_pays == 1.5 else "6:5（1.2倍）"
@@ -1178,12 +1333,33 @@ def render_quick_decision(rules, tc):
         st.markdown("---")
         return
 
-    # ── 段階的ヒット：最善手がヒットの間、引いたカードを追加入力できる ──
-    # 2枚目までは D/P/R も含めた完全判定。3枚目以降はヒット/スタンドのみ。
-    # 追加カードは「空」で表示し、実際に引いた札を選ぶまで手に加えない
-    # （勝手に高い札が入ってバーストするのを防ぐ）。
+    # まず2枚で判定
+    total2, soft2 = _hand_total_soft([p1, p2])
+    pair_rank2 = c1 if is_pair else 0
+    best2, evs2 = evaluate_hand(total2, soft2, is_pair, dup, rules,
+                                pair_rank=pair_rank2, tc=tc)
+
+    # ── スプリット推奨 → 2つの手に分けてそれぞれプレイアウト ──
+    if is_pair and best2 == "P":
+        st.markdown(_table_view_html([p1, p2], du), unsafe_allow_html=True)
+        hand_desc = (f"{_card_name(c1)},{_card_name(c2)} = ペア"
+                     f"（{'ソフト' if soft2 else 'ハード'}{total2}）")
+        _action_card("P", hand_desc, dup)
+        _reco_details("P", evs2, total2, soft2, pair_rank2, dup, tc, rules)
+        st.markdown("---")
+        st.markdown("#### ✂️ スプリット後の各ハンドをプレイ")
+        st.caption("ペアを2つの手に分けます。各手に配られたカードを選ぶと、"
+                   "それぞれの最善手（ヒット／スタンド）が表示されます。")
+        _play_split_hand("ハンド1", "q_spa", p1, du, dup, rules, tc)
+        st.markdown("")
+        _play_split_hand("ハンド2", "q_spb", p2, du, dup, rules, tc)
+        st.markdown("---")
+        return
+
+    # ── 単一ハンド：最善手がヒットの間、引いたカードを追加入力できる ──
+    # 追加カードは「空」で表示し、実際に引いた札を選ぶまで手に加えない。
     picks = [p1, p2]
-    best, evs, total, soft = "S", {"S": 0.0}, 0, False
+    best, evs, total, soft = best2, evs2, total2, soft2
     awaiting = False
     while True:
         total, soft = _hand_total_soft(picks)
@@ -1191,16 +1367,16 @@ def render_quick_decision(rules, tc):
         if total > 21:
             break  # バースト
         if n == 2:
-            pair_rank = c1 if is_pair else 0
-            best, evs = evaluate_hand(total, soft, is_pair, dup, rules,
-                                      pair_rank=pair_rank, tc=tc)
+            best, evs = best2, evs2
         else:
             _, evs_full = evaluate_hand(total, soft, False, dup, rules, tc=tc)
             evs = {"S": evs_full["S"], "H": evs_full["H"]}
             best = "H" if evs["H"] > evs["S"] else "S"
-        # 最善手がヒットなら、次に引いたカードの入力欄（空）を出す
+        # 最善手がヒットなら、次に引いたカードの入力欄を「ハイライト付き」で出す
         if best == "H" and total < 21 and n < 11:
             nk = f"q_p{n + 1}"
+            if st.session_state.get(nk) not in _QUICK_CARD_OPTS:
+                _hl_prompt("👇 ヒットです！引いたカードを、この下で選んでください")
             newpick = _pills_picker_optional(
                 f"自分のカード{_maru(n + 1)}（ヒットで引いた札を選ぶ）", nk)
             if newpick is None:
@@ -1231,74 +1407,13 @@ def render_quick_decision(rules, tc):
             f'バースト（{total}）💥</div>'
             f'<div style="font-size:0.9rem;color:#6D4C41;font-weight:600;margin-top:4px;">'
             f'あなたの手: {hand_desc}。合計が21を超えたので、この手は負けです。'
-            '「🔄 手をリセット」で次の手へ。</div></div>',
+            '「🔄 リセット」で次の手へ。</div></div>',
             unsafe_allow_html=True)
         st.markdown("---")
         return
 
-    bg = CELL_COLORS.get(best, "#ECEFF1")
-    fg = CELL_TEXT.get(best, "#37474F")
-    st.markdown(
-        f'<div style="background:{bg};border-radius:12px;padding:14px 18px;'
-        f'text-align:center;margin:6px 0;">'
-        f'<div style="font-size:0.8rem;color:{fg};opacity:0.85;font-weight:600;">'
-        f'あなたの手: {hand_desc} ／ ディーラー {_card_name(dup)}</div>'
-        f'<div style="font-size:2.0rem;font-weight:800;color:{fg};line-height:1.25;">'
-        f'{_ACTION_NAMES[best]}</div>'
-        f'<div style="font-size:0.9rem;color:{fg};font-weight:700;">（{best}）</div>'
-        f'</div>', unsafe_allow_html=True)
-
-    # 初心者向け：理由を平易な日本語で常時表示（EVも併記）
-    best_ev = evs[best]
-    ev_col = "#1B5E20" if best_ev >= 0 else "#B71C1C"
-    st.markdown(
-        f'<div style="background:#F1F8E9;border-left:4px solid #7CB342;'
-        f'border-radius:6px;padding:10px 14px;margin:2px 0 8px;font-size:0.9rem;'
-        f'line-height:1.65;color:#33401F;">💡 {_plain_reason(best, total, soft, pair_rank, dup, evs)}'
-        f'<div style="margin-top:6px;font-size:0.85rem;color:#455A64;">'
-        f'この選択の期待値（EV）＝ <strong style="color:{ev_col};">{best_ev:+.3f}</strong>'
-        f'（賭け金1単位あたり。プラスなら有利、マイナスなら最も損失の小さい手）</div></div>',
-        unsafe_allow_html=True)
-
-    with st.expander("📐 もっと詳しく（各アクションの期待値を数字で比較）", expanded=False):
-        parts = []
-        for act, ev in sorted(evs.items(), key=lambda x: -x[1]):
-            abg = CELL_COLORS.get(act, "#ECEFF1")
-            afg = CELL_TEXT.get(act, "#37474F")
-            mark = ' <strong style="color:#1565C0;">← 最善</strong>' if act == best else ""
-            parts.append(
-                f'<div style="display:flex;align-items:center;gap:10px;margin:5px 0;">'
-                f'<span style="min-width:104px;background:{abg};color:{afg};'
-                f'padding:3px 10px;border-radius:5px;font-weight:700;font-size:0.85rem;'
-                f'text-align:center;">{_ACTION_NAMES[act]}</span>'
-                f'<span style="font-weight:700;color:{"#1B5E20" if ev >= 0 else "#B71C1C"};">'
-                f'{ev:+.3f}</span>{mark}</div>')
-        st.markdown("".join(parts), unsafe_allow_html=True)
-        st.caption("EV＝賭け金1単位あたりの期待値。最も高いアクションが最善手です。"
-                   "（マイナスでも、より損失の小さい手を選ぶのが最善になります）")
-
-    with st.expander("❓ 期待値（EV）って何？（はじめての方へ）", expanded=False):
-        st.markdown(
-            "**EV（期待値）＝賭け金1単位につき、その手を1回打つごとに平均でどれだけ"
-            "増減するか**を表す数字です。\n\n"
-            "たとえば **EV −0.05** は、1単位賭けるたびに<strong>平均0.05単位ずつ損する</strong>"
-            "という意味（100回打てば平均で5単位ほどの損になる計算）です。\n\n"
-            "- **EVプラス**：長い目で見て<strong>あなたが有利</strong>な場面です。\n"
-            "- **EVマイナス**：不利な場面ですが、表示された最善手は"
-            "<strong>「数ある選択肢の中で最も損失が小さい打ち方」</strong>です。\n\n"
-            "ブラックジャックはもともとカジノがわずかに有利なゲームなので、"
-            "EVマイナスの場面は普通にあります。大切なのは"
-            "**毎回いちばん損の小さい（＝EVの高い）手を選び続けること**。"
-            "それが長期的に負けを最小化する唯一の方法です。",
-            unsafe_allow_html=True)
-        st.caption("※ 1回ごとの勝ち負けは運で大きく上下します。EVは「同じ場面を"
-                   "何度も繰り返したときの平均」を表す指標です。")
-
-    if total >= 12:
-        bd = stand_breakdown(total, dup, rules, tc=tc)
-        st.caption(
-            f"参考・スタンドした場合: 勝ち {bd['win'] * 100:.0f}% ／ "
-            f"引分 {bd['push'] * 100:.0f}% ／ 負け {bd['lose'] * 100:.0f}%")
+    _action_card(best, hand_desc, dup)
+    _reco_details(best, evs, total, soft, pair_rank, dup, tc, rules)
     st.markdown("---")
 
 
@@ -1530,8 +1645,6 @@ with tab1:
     _sub_q, _sub_tr, _sub_t, _sub_b = st.tabs(
         ["⚡ クイック判定", "🎓 トレーニング", "📊 早見表（全パターン）", "🎯 勝敗内訳"])
     with _sub_q:
-        if should_take_insurance(tab1_tc):
-            st.success(f"TC {tab1_tc:+d} → インシュランスを取る（TC ≥ +3）")
         render_quick_decision(rules, tab1_tc)
     with _sub_tr:
         render_trainer(rules, tab1_tc)
