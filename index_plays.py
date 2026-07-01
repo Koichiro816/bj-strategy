@@ -129,7 +129,15 @@ _INSURANCE_THRESHOLD_COMPUTED = False
 
 
 def _insurance_threshold():
-    """インシュランスが得になる最小のTCを動的に計算する（EV = 3*p(10) - 1 >= 0）。
+    """インシュランスの損益分岐となるTC指数を返す（EV = 3*p(10) - 1 = 0）。
+
+    インシュランスの期待値は 3*P(テン) - 1（2:1配当）で、P(テン)=1/3 が分岐点。
+    このモデルでの連続的な分岐点は約 TC=+3.3 になる。
+
+    ここで「EV>=0 となる最初の整数」を取ると切り上げで +4 になってしまうが、
+    それは実際の分岐点(+3.3)より高すぎる。カード指数の慣例どおり、連続分岐点を
+    線形補間で求めて最も近い整数へ丸める（+3.3 → +3）。これは定評ある Hi-Lo の
+    標準指数（Illustrious 18 の Insurance = +3）とも一致する。
 
     rulesに依存せず常に同じ値になるため、初回計算後はキャッシュを返す。
     """
@@ -137,10 +145,15 @@ def _insurance_threshold():
     if _INSURANCE_THRESHOLD_COMPUTED:
         return _INSURANCE_THRESHOLD_CACHE
     result = None
+    prev_tc, prev_ev = None, None
     for tc in _TC_SCAN_RANGE:
-        if 3 * card_prob_tc(10, tc) - 1 >= 0:
-            result = tc
+        ev = 3 * card_prob_tc(10, tc) - 1
+        if prev_ev is not None and prev_ev < 0 <= ev:
+            # prev_tc..tc の間でEVが0を横切る。線形補間で連続分岐点を求めて丸める
+            cross = prev_tc + (-prev_ev) / (ev - prev_ev)
+            result = int(round(cross))
             break
+        prev_tc, prev_ev = tc, ev
     _INSURANCE_THRESHOLD_CACHE = result
     _INSURANCE_THRESHOLD_COMPUTED = True
     return result
