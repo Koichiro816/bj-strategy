@@ -399,16 +399,17 @@ for _k, _v in _HR_DEFAULTS.items():
         st.session_state[_k] = _v
 
 # ユーザーが自分で保存したカスタムプリセット。
-# ブラウザの Cookie に保存し、再起動・再訪でも各自の端末（同一ブラウザ）に残す。
-# Cookie は st.context.cookies でサーバー側から読めるため、追加コンポーネントの
-# 往復やページ再読み込みが不要で、ウィジェット状態を乱さない（安定）。
-_PRESET_COOKIE = "bj_user_presets"
+# URL のクエリパラメータに保存する。ブラウザ更新でも URL は保持されるため
+# 各自の端末で残る。Cookie/localStorage と違い iframe を介さずサーバー側で
+# 直接読み書きでき、Streamlit Cloud＋モバイルでも確実に動作し、ウィジェット
+# 状態も乱さない。（新しいタブやブックマークからの再訪でも URL ごと残る）
+_PRESET_QP = "presets"
 
 
-def _read_presets_cookie():
-    """Cookie から保存済みプリセット辞書を復元する（無ければ空辞書）。"""
+def _read_presets_qp():
+    """URL クエリパラメータから保存済みプリセット辞書を復元する（無ければ空辞書）。"""
     try:
-        raw = st.context.cookies.get(_PRESET_COOKIE)
+        raw = st.query_params.get(_PRESET_QP)
     except Exception:
         raw = None
     if not raw:
@@ -421,31 +422,25 @@ def _read_presets_cookie():
 
 
 if "user_presets" not in st.session_state:
-    # 初回ロード時、ブラウザが送ってきた Cookie から復元
-    st.session_state["user_presets"] = _read_presets_cookie()
+    # 初回ロード時、URL に載っているプリセットから復元
+    st.session_state["user_presets"] = _read_presets_qp()
 
 
 def _persist_user_presets():
-    """現在の自分用プリセット一覧を Cookie に書き出す（1年間有効）。
-    毎回スクリプト冒頭でも呼ばれるため、保存直後の st.rerun() でも取りこぼさない。
-
-    components.html は iframe 内で実行されるため、iframe 側の document ではなく
-    親（アプリ本体）の document.cookie に書く必要がある。そうしないと更新時の
-    HTTP リクエストに Cookie が乗らず、st.context.cookies で読めない。"""
-    payload = quote(json.dumps(st.session_state.get("user_presets", {}),
-                               ensure_ascii=False))
-    components.html(
-        f"""<script>
-        var c = "{_PRESET_COOKIE}=" + "{payload}" +
-            ";max-age=31536000;path=/;SameSite=Lax";
-        try {{ window.parent.document.cookie = c; }}
-        catch (e) {{ document.cookie = c; }}
-        </script>""",
-        height=0,
-    )
+    """現在の自分用プリセット一覧を URL クエリパラメータへ書き出す。
+    同じ値の再設定は Streamlit 側で無視されるため再実行ループは起きない。"""
+    presets = st.session_state.get("user_presets", {})
+    try:
+        if presets:
+            st.query_params[_PRESET_QP] = quote(
+                json.dumps(presets, ensure_ascii=False))
+        elif _PRESET_QP in st.query_params:
+            del st.query_params[_PRESET_QP]
+    except Exception:
+        pass
 
 
-# 毎回、現在のプリセットを Cookie に反映（保存/削除→rerun でも確実に永続化）
+# 毎回、現在のプリセットを URL へ反映（保存/削除→rerun でも確実に永続化）
 _persist_user_presets()
 
 # プリセット保存時に集めるハウスルールのキー一覧
@@ -650,8 +645,9 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
     st.markdown("**💾 自分用プリセットを保存／呼び出し**")
     st.caption("いま選んでいるルールに名前を付けて保存できます。"
                "次回から上の一覧・「🔰 はじめての方へ」でワンタップ呼び出し。"
-               "※ 保存はお使いのブラウザに残ります（同じ端末・同じブラウザなら"
-               "再起動・再訪しても残ります。別の端末やシークレットモードには引き継がれません）。")
+               "※ 保存内容はこのページのURLに残ります。ブラウザを更新しても消えません。"
+               "別の日にも使いたいときは、この画面をブックマーク（ホーム画面に追加）"
+               "しておくと、次回もプリセット付きで開けます。")
     _save_name = st.text_input(
         "プリセット名", key="hr_preset_name", placeholder="例：六本木○○カジノ")
     _ps1, _ps2 = st.columns(2)
