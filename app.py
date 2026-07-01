@@ -915,30 +915,6 @@ st.caption(
     "カットカード使用卓では実測が約+0.1%高くなります。"
     "精密な検証は [Wizard of Odds 公式計算機](https://wizardofodds.com/games/blackjack/calculator/) をご利用ください。")
 
-# ─── 円換算の損失フック：抽象的な%を「1時間あたり平均◯円の損」に翻訳 ───
-with st.expander("💸 この卓での“平均的な負け”を円で試算する", expanded=False):
-    _lc1, _lc2 = st.columns(2)
-    _bet = _lc1.number_input("1ハンドの賭け金（円）", min_value=100, max_value=500000,
-                             value=1000, step=100, key="loss_bet")
-    _hph = _lc2.number_input("1時間あたりのハンド数", min_value=20, max_value=250,
-                             value=80, step=10, key="loss_hph",
-                             help="実店舗は概ね60〜100ハンド/時。人数が少ないほど多くなります。")
-    _loss_hand = _he / 100.0 * _bet
-    _loss_hour = _loss_hand * _hph
-    _sign = "得" if _loss_hour < 0 else "損"
-    _lcolor = "#1B5E20" if _loss_hour < 0 else _he_color
-    st.markdown(
-        f'<div style="background:{_he_bg};border-left:5px solid {_lcolor};'
-        f'border-radius:10px;padding:12px 16px;margin:4px 0;">'
-        f'<div style="font-size:0.8rem;color:#546E7A;font-weight:700;">'
-        f'ベーシックストラテジーを完璧に守った場合の“平均”</div>'
-        f'<div style="font-size:1.7rem;font-weight:800;color:{_lcolor};'
-        f'line-height:1.3;margin-top:2px;">1時間あたり 約 {abs(_loss_hour):,.0f} 円の{_sign}</div>'
-        f'<div style="font-size:0.82rem;color:#455A64;margin-top:4px;">'
-        f'1ハンドあたり約 {abs(_loss_hand):,.1f} 円／3時間で約 {abs(_loss_hour) * 3:,.0f} 円。'
-        f'</div></div>', unsafe_allow_html=True)
-    st.caption("※ あくまで長期平均の理論値です。1回ごとの結果は運で大きく上下します。"
-               "戦略を外すと損はこれより大きくなります。")
 
 
 
@@ -1343,6 +1319,24 @@ def _reco_details(best, evs, total, soft, pair_rank, dup, tc, rules):
         st.markdown("".join(parts), unsafe_allow_html=True)
         st.caption("EV＝賭け金1単位あたりの期待値。最も高いアクションが最善手です。"
                    "（マイナスでも、より損失の小さい手を選ぶのが最善になります）")
+
+    with st.expander("❓ 期待値（EV）って何？（はじめての方へ）", expanded=False):
+        st.markdown(
+            "**EV（期待値）＝賭け金1単位につき、その手を1回打つごとに平均でどれだけ"
+            "増減するか**を表す数字です。\n\n"
+            "たとえば **EV −0.05** は、1単位賭けるたびに<strong>平均0.05単位ずつ損する</strong>"
+            "という意味（100回打てば平均で5単位ほどの損になる計算）です。\n\n"
+            "- **EVプラス**：長い目で見て<strong>あなたが有利</strong>な場面です。\n"
+            "- **EVマイナス**：不利な場面ですが、表示された最善手は"
+            "<strong>「数ある選択肢の中で最も損失が小さい打ち方」</strong>です。\n\n"
+            "ブラックジャックはもともとカジノがわずかに有利なゲームなので、"
+            "EVマイナスの場面は普通にあります。大切なのは"
+            "**毎回いちばん損の小さい（＝EVの高い）手を選び続けること**。"
+            "それが長期的に負けを最小化する唯一の方法です。",
+            unsafe_allow_html=True)
+        st.caption("※ 1回ごとの勝ち負けは運で大きく上下します。EVは「同じ場面を"
+                   "何度も繰り返したときの平均」を表す指標です。")
+
     if total >= 12 and total <= 21:
         bd = stand_breakdown(total, dup, rules, tc=tc)
         st.caption(
@@ -1590,32 +1584,170 @@ def _hand_analysis(p1, p2, du, rules, tc):
     return best, evs, total, soft, pair_rank, dup
 
 
+def _tr_deal_card():
+    """トレーニング用にランダムな1枚を配る（10値札は出現率に合わせ4倍の重み）。"""
+    weights = [4 if o == _TEN_OPT else 1 for o in _QUICK_CARD_OPTS]
+    return random.choices(_QUICK_CARD_OPTS, weights=weights, k=1)[0]
+
+
+def _tr_new_hand(ss):
+    """新しい問題（1手）を配って状態を初期化する。"""
+    p1, p2, du = _deal_training_hand()
+    ss["tr_du"] = du
+    ss["tr_hands"] = [{"cards": [p1, p2], "done": False}]
+    ss["tr_active"] = 0
+    ss["tr_answered"] = None
+
+
+def _tr_eval(cards, du, rules, tc, ctx):
+    """現在の手の判定。ctx: initial(初手2枚) / hit(3枚以上) /
+    split2(分割後2枚・DASならD可) / splithit(分割後3枚以上)。"""
+    dup = _opt_rank(du)
+    total, soft = _hand_total_soft(cards)
+    is_pair = (len(cards) == 2 and _opt_rank(cards[0]) == _opt_rank(cards[1]))
+    pair_rank = _opt_rank(cards[0]) if is_pair else 0
+    if ctx == "initial":
+        best, evs = evaluate_hand(total, soft, is_pair, dup, rules,
+                                  pair_rank=pair_rank, tc=tc)
+    else:
+        _, full = evaluate_hand(total, soft, False, dup, rules, tc=tc)
+        evs = {"S": full["S"], "H": full["H"]}
+        if ctx == "split2" and rules.double_after_split and "D" in full:
+            evs["D"] = full["D"]
+        best = max(evs, key=evs.get)
+    return best, evs, total, soft, is_pair, pair_rank, dup
+
+
+def _tr_next_hand(ss):
+    """未完了の次のハンドへ active を移す（無ければそのまま＝全完了）。"""
+    hands = ss["tr_hands"]
+    for i in range(ss["tr_active"] + 1, len(hands)):
+        if not hands[i]["done"]:
+            ss["tr_active"] = i
+            return
+
+
+def _tr_advance(ss, best, rules):
+    """正解の最善手に沿って手を進める（配札・分割・完了判定）。"""
+    ss["tr_answered"] = None
+    hands = ss["tr_hands"]
+    active = ss["tr_active"]
+    h = hands[active]
+    cards = h["cards"]
+    if best == "P":
+        pc = cards[0]
+        aces = _opt_rank(pc) == 11
+        newhands = []
+        for _ in range(2):
+            nh = {"cards": [pc, _tr_deal_card()], "done": False}
+            # スプリットしたエースは原則1枚のみ（引き足し不可なら即完了）
+            if aces and not rules.draw_to_split_aces:
+                nh["done"] = True
+            newhands.append(nh)
+        hands[active:active + 1] = newhands
+        if hands[active]["done"]:
+            _tr_next_hand(ss)
+        return
+    if best == "H":
+        cards.append(_tr_deal_card())
+        total, _ = _hand_total_soft(cards)
+        if total >= 21 or len(cards) >= 11:
+            h["done"] = True
+            _tr_next_hand(ss)
+        return
+    if best == "D":
+        cards.append(_tr_deal_card())
+        h["done"] = True
+        _tr_next_hand(ss)
+        return
+    # S（スタンド）/ R（サレンダー）→ この手は完了
+    h["done"] = True
+    _tr_next_hand(ss)
+
+
+def _tr_stats(ss):
+    """成績メトリクスとリセットボタンを描画する。"""
+    tot, cor = ss["tr_total"], ss["tr_correct"]
+    acc = (cor / tot * 100) if tot else 0.0
+    s1m, s2m, s3m = st.columns(3)
+    s1m.metric("正答率", f"{acc:.0f}%")
+    s2m.metric("連続正解", f"{ss['tr_streak']}")
+    s3m.metric("最高連続", f"{ss['tr_best']}")
+    st.caption(f"これまで {cor}/{tot} 問正解。"
+               + ("いい調子です！" if acc >= 80 and tot >= 5 else
+                  "間違えた手こそ伸びしろ。理由を読んで次へ。" if tot >= 1 else
+                  "まずは1問やってみましょう。"))
+    if tot >= 1 and st.button("成績をリセット", key="tr_reset"):
+        for _k in ("tr_total", "tr_correct", "tr_streak", "tr_best"):
+            ss[_k] = 0
+        st.rerun()
+
+
 def render_trainer(rules, tc):
-    """配られた手の最善手をボタンで当てる練習モード。即時フィードバック＋成績記録。"""
+    """最善手を当て、そのまま手を最後までプレイする練習モード。
+    ヒットなら次の札が配られて継続、スプリットなら2つの手を順にプレイする。"""
     ss = st.session_state
     for _k, _v in (("tr_total", 0), ("tr_correct", 0),
                    ("tr_streak", 0), ("tr_best", 0)):
         ss.setdefault(_k, _v)
-    if "tr_hand" not in ss:
-        ss["tr_hand"] = _deal_training_hand()
-        ss["tr_answered"] = None
+    if "tr_hands" not in ss:
+        _tr_new_hand(ss)
 
-    st.markdown("##### 🎓 トレーニング（出された手の最善手を当てる）")
-    st.caption("配られた手に対して、あなたなら何をする？ ボタンで選ぶと正解と理由がすぐ分かります。"
-               "繰り返すうちに、表を見なくても手が動くようになります。")
+    st.markdown("##### 🎓 トレーニング（最善手を当てて、そのまま最後までプレイ）")
+    st.caption("配られた手の最善手をボタンで選ぶと、正解と理由が分かります。"
+               "ヒットやスプリットのときは手がそのまま進み、決着まで練習できます。")
 
-    p1, p2, du = ss["tr_hand"]
-    best, evs, total, soft, pair_rank, dup = _hand_analysis(p1, p2, du, rules, tc)
-    st.markdown(_table_view_html([p1, p2], du), unsafe_allow_html=True)
+    du = ss["tr_du"]
+    dup = _opt_rank(du)
+    hands = ss["tr_hands"]
+    active = ss["tr_active"]
+    is_split = len(hands) > 1
 
+    # 卓表示（ディーラー＋各ハンド。分割時はプレイ中/完了を表示）
+    _lbl = ('font-size:0.72rem;color:#607D8B;font-weight:700;text-align:center;'
+            'letter-spacing:1px;')
+    _html = (f'<div style="margin:8px 0 2px;"><div style="{_lbl}">ディーラー</div>'
+             f'{_hand_cards_html(du)}'
+             f'<div style="border-top:1px dashed #B0BEC5;width:72%;margin:9px auto;">'
+             f'</div>')
+    for i, hh in enumerate(hands):
+        if is_split:
+            state = ("✓ 完了" if hh["done"]
+                     else "▶ プレイ中" if i == active else "待機")
+            tag = f'ハンド{i + 1}（{state}）'
+        else:
+            tag = "あなたの手札"
+        _html += f'<div style="{_lbl}">{tag}</div>{_hand_cards_html(*hh["cards"])}'
+    _html += '</div>'
+    st.markdown(_html, unsafe_allow_html=True)
+
+    all_done = all(h["done"] for h in hands)
+    if all_done:
+        st.success("この手は決着です。おつかれさまでした。")
+        if st.button("次の問題（新しい手）▶", type="primary", width='stretch',
+                     key="tr_next_hand"):
+            _tr_new_hand(ss)
+            st.rerun()
+        _tr_stats(ss)
+        return
+
+    h = hands[active]
+    cards = h["cards"]
+    if is_split:
+        ctx = "split2" if len(cards) == 2 else "splithit"
+    else:
+        ctx = "initial" if len(cards) == 2 else "hit"
+    best, evs, total, soft, is_pair, pair_rank, _ = _tr_eval(cards, du, rules, tc, ctx)
+
+    label = f"ハンド{active + 1}" if is_split else "この手"
     answered = ss.get("tr_answered")
     if not answered:
-        st.caption("↓ あなたならどうする？")
+        st.caption(f"↓ {label}、あなたならどうする？")
         acts = [a for a in ("H", "S", "D", "P", "R") if a in evs]
         cols = st.columns(len(acts))
         for i, act in enumerate(acts):
-            if cols[i].button(_ACTION_NAMES[act], key=f"tr_btn_{act}",
-                              width='stretch'):
+            if cols[i].button(f"{_ACTION_ICON.get(act, '')} {_ACTION_NAMES[act]}",
+                              key=f"tr_btn_{act}", width='stretch'):
                 ok = (act == best)
                 ss["tr_total"] += 1
                 if ok:
@@ -1644,25 +1776,16 @@ def render_trainer(rules, tc):
             f'最善手の期待値（EV）＝ <strong style="color:{ec};">{be:+.3f}</strong>'
             f'（賭け金1単位あたり）</div></div>',
             unsafe_allow_html=True)
-        if st.button("次の問題 ▶", type="primary", width='stretch'):
-            ss["tr_hand"] = _deal_training_hand()
-            ss["tr_answered"] = None
+        # 次のアクションが続くか、この手が決着かで文言を変える
+        if best in ("H", "P") or (best == "D"):
+            nxt = "続ける ▶（次の札・手へ）"
+        else:
+            nxt = "続ける ▶"
+        if st.button(nxt, type="primary", width='stretch', key="tr_continue"):
+            _tr_advance(ss, best, rules)
             st.rerun()
 
-    tot, cor = ss["tr_total"], ss["tr_correct"]
-    acc = (cor / tot * 100) if tot else 0.0
-    s1m, s2m, s3m = st.columns(3)
-    s1m.metric("正答率", f"{acc:.0f}%")
-    s2m.metric("連続正解", f"{ss['tr_streak']}")
-    s3m.metric("最高連続", f"{ss['tr_best']}")
-    st.caption(f"これまで {cor}/{tot} 問正解。"
-               + ("いい調子です！" if acc >= 80 and tot >= 5 else
-                  "間違えた手こそ伸びしろ。理由を読んで次へ。" if tot >= 1 else
-                  "まずは1問やってみましょう。"))
-    if tot >= 1 and st.button("成績をリセット", key="tr_reset"):
-        for _k in ("tr_total", "tr_correct", "tr_streak", "tr_best"):
-            ss[_k] = 0
-        st.rerun()
+    _tr_stats(ss)
 
 
 # ===========================================================================
