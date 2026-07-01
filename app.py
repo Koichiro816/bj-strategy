@@ -2,6 +2,7 @@
 app.py — Streamlit ウェブアプリ（スマホ対応）
 """
 
+import json
 import os
 import random
 import tempfile
@@ -9,6 +10,11 @@ import tempfile
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+try:
+    from streamlit_local_storage import LocalStorage
+except Exception:  # 依存が無い環境でもアプリ本体は動くようにする
+    LocalStorage = None
 
 from rules import HouseRules
 from strategy import (generate_strategy_table, generate_ev_table, stand_breakdown,
@@ -395,9 +401,40 @@ for _k, _v in _HR_DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
-# ユーザーが自分で保存したカスタムプリセット（このセッション中のみ保持）
+# ユーザーが自分で保存したカスタムプリセット。
+# ブラウザの localStorage に保存し、再起動・再訪でも各自の端末に残す。
+_LS_PRESET_KEY = "bj_user_presets"
+_localS = LocalStorage() if LocalStorage is not None else None
+
 if "user_presets" not in st.session_state:
     st.session_state["user_presets"] = {}
+
+# localStorage からの復元（コンポーネントのハイドレーション後の再実行で値が届く）。
+# セッション側が空のときだけ取り込み、保存直後の内容を上書きしない。
+if _localS is not None and not st.session_state["user_presets"]:
+    try:
+        _stored = _localS.getItem(_LS_PRESET_KEY)
+        if _stored:
+            _parsed = json.loads(_stored)
+            if isinstance(_parsed, dict):
+                st.session_state["user_presets"] = _parsed
+    except Exception:
+        pass
+
+
+def _persist_user_presets():
+    """現在の自分用プリセット一覧を localStorage へ書き出す。"""
+    if _localS is None:
+        return
+    try:
+        _localS.setItem(
+            _LS_PRESET_KEY,
+            json.dumps(st.session_state["user_presets"], ensure_ascii=False),
+            key="ls_save_presets",
+        )
+    except Exception:
+        pass
+
 
 # プリセット保存時に集めるハウスルールのキー一覧
 _HR_KEYS = list(_HR_DEFAULTS.keys())
@@ -597,8 +634,9 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
     st.markdown("---")
     st.markdown("**💾 自分用プリセットを保存／呼び出し**")
     st.caption("いま選んでいるルールに名前を付けて保存できます。"
-               "次回から上の一覧でワンタップ呼び出し。"
-               "※ 保存はこのセッション中のみ有効です（ページを閉じると消えます）。")
+               "次回から上の一覧・「🔰 はじめての方へ」でワンタップ呼び出し。"
+               "※ 保存はお使いのブラウザに残ります（同じ端末・同じブラウザなら"
+               "再起動・再訪しても残ります。別の端末やシークレットモードには引き継がれません）。")
     _save_name = st.text_input(
         "プリセット名", key="hr_preset_name", placeholder="例：六本木○○カジノ")
     _ps1, _ps2 = st.columns(2)
@@ -612,6 +650,7 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
             else:
                 st.session_state["user_presets"][_nm] = {
                     _key: st.session_state[_key] for _key in _HR_KEYS}
+                _persist_user_presets()
                 st.session_state["_preset_saved_flag"] = True
                 st.rerun()
     with _ps2:
@@ -621,6 +660,7 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
                 "保存済みを削除", ["（選択）"] + _user_names, key="hr_preset_del")
             if st.button("選択を削除", width='stretch') and _del in _user_names:
                 del st.session_state["user_presets"][_del]
+                _persist_user_presets()
                 if st.session_state.get("hr_ruleset") == _del:
                     st.session_state["hr_ruleset"] = "カスタム（手動設定）"
                 st.rerun()
