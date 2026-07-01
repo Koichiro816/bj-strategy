@@ -984,8 +984,15 @@ def _card_name(r: int) -> str:
 
 def _rank_card_html(rank):
     """選んだランクをシンプルなカード（白地にランク表記のみ・スート無し）で描画。
-    10バリューは「10,J,Q,K」を1枚にまとめて表示する。"""
+    10バリューは「10,J,Q,K」を1枚にまとめて表示する。rank が None のときは
+    未選択を表す空欄の点線枠を描画する。"""
     W, H = 58, 82
+    if rank is None:
+        return (
+            f'<div style="width:{W}px;height:{H}px;border:2px dashed #cfcfcf;'
+            f'border-radius:7px;background:#fafafa;display:flex;align-items:center;'
+            f'justify-content:center;color:#c0c0c0;font-size:22px;flex:0 0 auto;">?'
+            f'</div>')
     if rank == _TEN_OPT:
         inner = ('<span style="font-size:21px;font-weight:800;line-height:1;">10</span>'
                  '<span style="font-size:12px;font-weight:700;letter-spacing:2px;'
@@ -1057,10 +1064,10 @@ def _pills_picker_optional(label, key):
 
 
 def _reset_quick_hand():
-    """クイック判定の3枚目以降の入力を消して2枚に戻す（on_click コールバック）。
+    """クイック判定のカード入力を全て消して空欄に戻す（on_click コールバック）。
     ウィジェット生成前に実行されるため、pop が安全に効く。"""
-    for i in range(3, 12):
-        st.session_state.pop(f"q_p{i}", None)
+    for k in ["q_du", "q_p1", "q_p2"] + [f"q_p{i}" for i in range(3, 12)]:
+        st.session_state.pop(k, None)
 
 
 def _dealer_strength_phrase(dup):
@@ -1130,10 +1137,27 @@ def render_quick_decision(rules, tc):
     st.caption("スマホでも一目。自分の2枚とディーラーのアップカードを選ぶと、"
                "最善手と「なぜ」を即表示します。表を探す必要はありません。")
     st.caption("↓ ランクをタップして選んでください")
-    # 下の卓表示（ディーラー上・自分下）に合わせ、選択も同じ順に並べる
-    du = _pills_picker("ディーラーのアップカード", "q_du", _TEN_DEFAULT)
-    p1 = _pills_picker("自分のカード①", "q_p1", _TEN_DEFAULT)
-    p2 = _pills_picker("自分のカード②", "q_p2", "6")
+    # 下の卓表示（ディーラー上・自分下）に合わせ、選択も同じ順に並べる。
+    # 初期状態は全て空欄（未選択）。3枚とも選ぶまで判定は出さない。
+    du = _pills_picker_optional("ディーラーのアップカード", "q_du")
+    p1 = _pills_picker_optional("自分のカード①", "q_p1")
+    p2 = _pills_picker_optional("自分のカード②", "q_p2")
+
+    # リセット（選択があるときだけ表示）。全カードを空欄に戻す。
+    _extra_keys = [f"q_p{i}" for i in range(3, 12)]
+    _any_selected = any(st.session_state.get(k) in _QUICK_CARD_OPTS
+                        for k in ["q_du", "q_p1", "q_p2"] + _extra_keys)
+    if _any_selected:
+        st.button("🔄 リセット（カードを全て消す）", key="q_reset",
+                  on_click=_reset_quick_hand)
+
+    # 未選択がある間は、卓を空欄表示して選択を促す
+    if du is None or p1 is None or p2 is None:
+        st.markdown(_table_view_html([p1, p2], du), unsafe_allow_html=True)
+        st.info("ディーラーのアップカードと、自分のカード①②を選ぶと、"
+                "最善手を表示します。")
+        st.markdown("---")
+        return
 
     c1, c2, dup = _opt_rank(p1), _opt_rank(p2), _opt_rank(du)
     is_pair = (c1 == c2)
@@ -1187,14 +1211,6 @@ def render_quick_decision(rules, tc):
         break
 
     pair_rank = c1 if (is_pair and len(picks) == 2) else 0
-
-    # 手をリセット（有効な3枚目以降がある場合のみ表示）。
-    # on_click でウィジェット生成前に pop するため確実に消える。
-    if len(picks) > 2 or any(
-            st.session_state.get(f"q_p{i}") in _QUICK_CARD_OPTS
-            for i in range(3, 12)):
-        st.button("🔄 手をリセット（2枚に戻す）", key="q_reset",
-                  on_click=_reset_quick_hand)
 
     # 卓レイアウトで全カードを確認表示
     st.markdown(_table_view_html(picks, du), unsafe_allow_html=True)
