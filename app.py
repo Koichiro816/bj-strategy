@@ -2,6 +2,7 @@
 app.py — Streamlit ウェブアプリ（スマホ対応）
 """
 
+import hashlib
 import json
 import os
 import random
@@ -36,15 +37,36 @@ st.set_page_config(
 )
 
 
+_AUTH_COOKIE = "bj_auth"
+
+
+def _auth_token(pw):
+    """パスワードから認証トークン（Cookie保存用）を生成する。平文は保存しない。"""
+    return hashlib.sha256(("bj-auth-v1:" + str(pw)).encode()).hexdigest()[:32]
+
+
 def _check_password():
-    """パスワード認証。secrets に PASSWORD が設定されていない場合は認証をスキップ。"""
+    """パスワード認証。secrets に PASSWORD が設定されていない場合は認証をスキップ。
+    一度ログインすると第一者Cookieに認証トークンを保存し、モバイルでの
+    WebSocket再接続やリロードでもログイン画面に戻らない（セッション消失対策）。"""
     try:
         correct = st.secrets["PASSWORD"]
     except (KeyError, FileNotFoundError):
         return  # ローカル開発時はスキップ
 
+    expected = _auth_token(correct)
+    st.session_state["_auth_expected"] = expected  # 後段でCookieへ保存する際に使用
+
     if st.session_state.get("authenticated"):
         return
+
+    # Cookie による自動ログイン（サーバー側で読めるため再接続でも即復帰）
+    try:
+        if st.context.cookies.get(_AUTH_COOKIE) == expected:
+            st.session_state.authenticated = True
+            return
+    except Exception:
+        pass
 
     st.markdown(
         '<div style="max-width:360px;margin:80px auto;">', unsafe_allow_html=True)
@@ -477,6 +499,18 @@ _PRESET_COOKIE = "bj_user_presets"
 # CookieManager は一度だけ生成。値が変わらない限り再実行を誘発しないため
 # ①②のようなウィジェットリセットは起きない。
 _cookie_manager = stx.CookieManager(key="bj_cookie_mgr") if stx is not None else None
+
+# 認証トークンを第一者Cookieに保存（未保存のときだけ）。以後リロード/再接続で
+# サーバー側が読み取り、ログイン画面に戻らずに自動復帰できる。
+_auth_expected = st.session_state.get("_auth_expected")
+if (_auth_expected and st.session_state.get("authenticated")
+        and _cookie_manager is not None):
+    try:
+        if st.context.cookies.get(_AUTH_COOKIE) != _auth_expected:
+            _cookie_manager.set(_AUTH_COOKIE, _auth_expected, key="set_auth",
+                                max_age=2592000, same_site="lax")  # 30日
+    except Exception:
+        pass
 
 
 def _cookie_presets():
