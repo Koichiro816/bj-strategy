@@ -1048,6 +1048,21 @@ def _pills_picker(label, key, default):
     return st.session_state[key] or default
 
 
+def _pills_picker_optional(label, key):
+    """省略可能なカード選択。デフォルトを注入せず、未選択なら None を返す。
+    ヒットで引いた札の追加入力用（勝手に高い札が入ってバーストするのを防ぐ）。"""
+    st.pills(label, _QUICK_CARD_OPTS, selection_mode="single", key=key)
+    val = st.session_state.get(key)
+    return val if val in _QUICK_CARD_OPTS else None
+
+
+def _reset_quick_hand():
+    """クイック判定の3枚目以降の入力を消して2枚に戻す（on_click コールバック）。
+    ウィジェット生成前に実行されるため、pop が安全に効く。"""
+    for i in range(3, 12):
+        st.session_state.pop(f"q_p{i}", None)
+
+
 def _dealer_strength_phrase(dup):
     """ディーラーのアップカードの強さを初心者向けの言葉にする。
     自滅（バースト）しやすさの実勢：6≧5＞4＞3＞2 ＞ 7＞8＞9＞10＞A。
@@ -1141,8 +1156,11 @@ def render_quick_decision(rules, tc):
 
     # ── 段階的ヒット：最善手がヒットの間、引いたカードを追加入力できる ──
     # 2枚目までは D/P/R も含めた完全判定。3枚目以降はヒット/スタンドのみ。
+    # 追加カードは「空」で表示し、実際に引いた札を選ぶまで手に加えない
+    # （勝手に高い札が入ってバーストするのを防ぐ）。
     picks = [p1, p2]
     best, evs, total, soft = "S", {"S": 0.0}, 0, False
+    awaiting = False
     while True:
         total, soft = _hand_total_soft(picks)
         n = len(picks)
@@ -1156,23 +1174,27 @@ def render_quick_decision(rules, tc):
             _, evs_full = evaluate_hand(total, soft, False, dup, rules, tc=tc)
             evs = {"S": evs_full["S"], "H": evs_full["H"]}
             best = "H" if evs["H"] > evs["S"] else "S"
-        # 最善手がヒットなら、次に引いたカードのpickerを追加して継続
+        # 最善手がヒットなら、次に引いたカードの入力欄（空）を出す
         if best == "H" and total < 21 and n < 11:
             nk = f"q_p{n + 1}"
-            newpick = _pills_picker(
-                f"自分のカード{_maru(n + 1)}（ヒットで引いた札を選ぶ）", nk, _TEN_DEFAULT)
+            newpick = _pills_picker_optional(
+                f"自分のカード{_maru(n + 1)}（ヒットで引いた札を選ぶ）", nk)
+            if newpick is None:
+                awaiting = True
+                break  # 入力待ち：札を選ぶまでこれ以上増やさない
             picks.append(newpick)
             continue
         break
 
     pair_rank = c1 if (is_pair and len(picks) == 2) else 0
 
-    # 手をリセット（3枚目以降の入力を消して2枚に戻す）
-    if len(picks) > 2 or any(f"q_p{i}" in st.session_state for i in range(3, 12)):
-        if st.button("🔄 手をリセット（2枚に戻す）", key="q_reset"):
-            for i in range(3, 12):
-                st.session_state.pop(f"q_p{i}", None)
-            st.rerun()
+    # 手をリセット（有効な3枚目以降がある場合のみ表示）。
+    # on_click でウィジェット生成前に pop するため確実に消える。
+    if len(picks) > 2 or any(
+            st.session_state.get(f"q_p{i}") in _QUICK_CARD_OPTS
+            for i in range(3, 12)):
+        st.button("🔄 手をリセット（2枚に戻す）", key="q_reset",
+                  on_click=_reset_quick_hand)
 
     # 卓レイアウトで全カードを確認表示
     st.markdown(_table_view_html(picks, du), unsafe_allow_html=True)
