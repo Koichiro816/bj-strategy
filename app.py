@@ -319,6 +319,71 @@ def _render_pro_gate() -> bool:
 IS_PRO = _render_pro_gate()
 
 
+def _line_url():
+    """LINE友だち追加URL（secrets の LINE_URL）。未設定なら空文字。"""
+    try:
+        return st.secrets.get("LINE_URL", "") or ""
+    except Exception:
+        return ""
+
+
+def _tool_url():
+    """このツールの公開URL（シェア用）。"""
+    try:
+        return st.context.url or ""
+    except Exception:
+        return ""
+
+
+def _render_line_cta(key_suffix=""):
+    """LINE友だち追加の常設CTA（リードマグネットの集客導線）。"""
+    url = _line_url()
+    href = url if url else "#"
+    st.markdown(
+        f'<a href="{href}" target="_blank" rel="noopener" '
+        f'style="display:block;text-decoration:none;margin:6px 0;">'
+        f'<div style="background:#06C755;color:#ffffff;border-radius:12px;'
+        f'padding:13px 14px;text-align:center;font-weight:800;font-size:0.95rem;'
+        f'box-shadow:0 2px 8px rgba(6,199,85,.35);line-height:1.4;">'
+        f'💬 LINEで無料の「店舗別攻略・ツール更新」を受け取る'
+        f'<div style="font-size:0.72rem;font-weight:600;opacity:.92;margin-top:2px;">'
+        f'タップで友だち追加（無料）</div></div></a>',
+        unsafe_allow_html=True)
+    if not url:
+        st.caption("※管理者向け: secrets.toml に LINE_URL を設定するとリンクが有効化されます。")
+
+
+def _render_share_home():
+    """SNSシェアとホーム画面追加の導線（バイラル＋定着）。"""
+    url = _tool_url()
+    if url:
+        txt = quote("ブラックジャックの最善手が一目でわかる無料ツール🃏")
+        u = quote(url)
+        x_url = f"https://twitter.com/intent/tweet?text={txt}&url={u}"
+        line_url = f"https://social-plugins.line.me/lineit/share?url={u}"
+        st.markdown(
+            f'<div style="display:flex;gap:8px;margin:4px 0;">'
+            f'<a href="{x_url}" target="_blank" rel="noopener" style="flex:1;text-decoration:none;">'
+            f'<div style="background:#111;color:#fff;border-radius:8px;padding:8px;'
+            f'text-align:center;font-weight:700;font-size:0.82rem;">𝕏 でシェア</div></a>'
+            f'<a href="{line_url}" target="_blank" rel="noopener" style="flex:1;text-decoration:none;">'
+            f'<div style="background:#06C755;color:#fff;border-radius:8px;padding:8px;'
+            f'text-align:center;font-weight:700;font-size:0.82rem;">LINEでシェア</div></a>'
+            f'</div>', unsafe_allow_html=True)
+    with st.expander("📱 ホーム画面に追加してアプリのように使う"):
+        st.markdown(
+            "ホーム画面に置くと、次回からワンタップで起動でき、保存した設定も"
+            "そのまま残ります。\n\n"
+            "- **iPhone（Safari）**：下部の共有ボタン → 「ホーム画面に追加」\n"
+            "- **Android（Chrome）**：右上メニュー → 「ホーム画面に追加」")
+
+
+with st.sidebar:
+    st.markdown("---")
+    _render_line_cta()
+    _render_share_home()
+
+
 def _pro_locked_notice(feature_name: str):
     """PRO限定機能のロック表示。無料ユーザーに解放方法を案内する。"""
     st.warning(f"🔒 **{feature_name}** は PRO 機能です。")
@@ -850,6 +915,31 @@ st.caption(
     "カットカード使用卓では実測が約+0.1%高くなります。"
     "精密な検証は [Wizard of Odds 公式計算機](https://wizardofodds.com/games/blackjack/calculator/) をご利用ください。")
 
+# ─── 円換算の損失フック：抽象的な%を「1時間あたり平均◯円の損」に翻訳 ───
+with st.expander("💸 この卓での“平均的な負け”を円で試算する", expanded=False):
+    _lc1, _lc2 = st.columns(2)
+    _bet = _lc1.number_input("1ハンドの賭け金（円）", min_value=100, max_value=500000,
+                             value=1000, step=100, key="loss_bet")
+    _hph = _lc2.number_input("1時間あたりのハンド数", min_value=20, max_value=250,
+                             value=80, step=10, key="loss_hph",
+                             help="実店舗は概ね60〜100ハンド/時。人数が少ないほど多くなります。")
+    _loss_hand = _he / 100.0 * _bet
+    _loss_hour = _loss_hand * _hph
+    _sign = "得" if _loss_hour < 0 else "損"
+    _lcolor = "#1B5E20" if _loss_hour < 0 else _he_color
+    st.markdown(
+        f'<div style="background:{_he_bg};border-left:5px solid {_lcolor};'
+        f'border-radius:10px;padding:12px 16px;margin:4px 0;">'
+        f'<div style="font-size:0.8rem;color:#546E7A;font-weight:700;">'
+        f'ベーシックストラテジーを完璧に守った場合の“平均”</div>'
+        f'<div style="font-size:1.7rem;font-weight:800;color:{_lcolor};'
+        f'line-height:1.3;margin-top:2px;">1時間あたり 約 {abs(_loss_hour):,.0f} 円の{_sign}</div>'
+        f'<div style="font-size:0.82rem;color:#455A64;margin-top:4px;">'
+        f'1ハンドあたり約 {abs(_loss_hand):,.1f} 円／3時間で約 {abs(_loss_hour) * 3:,.0f} 円。'
+        f'</div></div>', unsafe_allow_html=True)
+    st.caption("※ あくまで長期平均の理論値です。1回ごとの結果は運で大きく上下します。"
+               "戦略を外すと損はこれより大きくなります。")
+
 
 
 @st.cache_data(show_spinner=False)
@@ -976,11 +1066,11 @@ def _table_card(title: str, html_inner: str) -> str:
 
 def legend_html(show_tc=False):
     items = [
-        ("H = ヒット",     CELL_COLORS["H"], CELL_TEXT["H"]),
-        ("S = スタンド",   CELL_COLORS["S"], CELL_TEXT["S"]),
-        ("D = ダブル",     CELL_COLORS["D"], CELL_TEXT["D"]),
-        ("P = スプリット", CELL_COLORS["P"], CELL_TEXT["P"]),
-        ("R = サレンダー", CELL_COLORS["R"], CELL_TEXT["R"]),
+        (f'{_ACTION_ICON["H"]} H = ヒット',     CELL_COLORS["H"], CELL_TEXT["H"]),
+        (f'{_ACTION_ICON["S"]} S = スタンド',   CELL_COLORS["S"], CELL_TEXT["S"]),
+        (f'{_ACTION_ICON["D"]} D = ダブル',     CELL_COLORS["D"], CELL_TEXT["D"]),
+        (f'{_ACTION_ICON["P"]} P = スプリット', CELL_COLORS["P"], CELL_TEXT["P"]),
+        (f'{_ACTION_ICON["R"]} R = サレンダー', CELL_COLORS["R"], CELL_TEXT["R"]),
     ]
     parts = [
         '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 10px 0;'
@@ -1008,6 +1098,8 @@ def legend_html(show_tc=False):
 # ===========================================================================
 _ACTION_NAMES = {"H": "ヒット", "S": "スタンド", "D": "ダブルダウン",
                  "P": "スプリット", "R": "サレンダー"}
+# CUD（色覚多様性）対応：色に依存せず形でも識別できるよう各手に記号を割り当てる。
+_ACTION_ICON = {"H": "⬆", "S": "✋", "D": "⏫", "P": "✂", "R": "🏳"}
 # 10バリュー（10・J・Q・K）は戦略上すべて同じなので1つの選択肢にまとめる。
 _TEN_OPT = "10,J,Q,K"
 _QUICK_CARD_OPTS = ["2", "3", "4", "5", "6", "7", "8", "9", _TEN_OPT, "A"]
@@ -1202,12 +1294,13 @@ def _action_card(best, hand_desc, dup, insurance=False):
     insurance=True のときは大きな表示を『🛡️インシュランス ⇒ 最善手』にする。"""
     bg = CELL_COLORS.get(best, "#ECEFF1")
     fg = CELL_TEXT.get(best, "#37474F")
+    _ico = _ACTION_ICON.get(best, "")
     if insurance:
         big = (f'🛡️インシュランス<span style="opacity:.55;"> ⇒ </span>'
-               f'{_ACTION_NAMES[best]}')
+               f'{_ico} {_ACTION_NAMES[best]}')
         fs = "1.7rem"
     else:
-        big = _ACTION_NAMES[best]
+        big = f'{_ico} {_ACTION_NAMES[best]}'
         fs = "2.0rem"
     st.markdown(
         f'<div style="background:{bg};border-radius:12px;padding:14px 18px;'
@@ -1700,6 +1793,7 @@ with tab1:
         ["⚡ クイック判定", "🎓 トレーニング", "📊 早見表（全パターン）", "🎯 勝敗内訳"])
     with _sub_q:
         render_quick_decision(rules, tab1_tc)
+        _render_line_cta()
     with _sub_tr:
         render_trainer(rules, tab1_tc)
     with _sub_t:
