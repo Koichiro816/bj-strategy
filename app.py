@@ -427,13 +427,19 @@ if "user_presets" not in st.session_state:
 
 def _persist_user_presets():
     """現在の自分用プリセット一覧を Cookie に書き出す（1年間有効）。
-    毎回スクリプト冒頭でも呼ばれるため、保存直後の st.rerun() でも取りこぼさない。"""
+    毎回スクリプト冒頭でも呼ばれるため、保存直後の st.rerun() でも取りこぼさない。
+
+    components.html は iframe 内で実行されるため、iframe 側の document ではなく
+    親（アプリ本体）の document.cookie に書く必要がある。そうしないと更新時の
+    HTTP リクエストに Cookie が乗らず、st.context.cookies で読めない。"""
     payload = quote(json.dumps(st.session_state.get("user_presets", {}),
                                ensure_ascii=False))
     components.html(
         f"""<script>
-        document.cookie = "{_PRESET_COOKIE}=" + "{payload}" +
+        var c = "{_PRESET_COOKIE}=" + "{payload}" +
             ";max-age=31536000;path=/;SameSite=Lax";
+        try {{ window.parent.document.cookie = c; }}
+        catch (e) {{ document.cookie = c; }}
         </script>""",
         height=0,
     )
