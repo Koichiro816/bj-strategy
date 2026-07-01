@@ -11,7 +11,11 @@ from urllib.parse import quote, unquote
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import streamlit.components.v1 as components
+
+try:
+    import extra_streamlit_components as stx
+except Exception:  # 依存が無い環境でもアプリ本体は動く
+    stx = None
 
 from rules import HouseRules
 from strategy import (generate_strategy_table, generate_ev_table, stand_breakdown,
@@ -399,17 +403,23 @@ for _k, _v in _HR_DEFAULTS.items():
         st.session_state[_k] = _v
 
 # ユーザーが自分で保存したカスタムプリセット。
-# URL のクエリパラメータに保存する。ブラウザ更新でも URL は保持されるため
-# 各自の端末で残る。Cookie/localStorage と違い iframe を介さずサーバー側で
-# 直接読み書きでき、Streamlit Cloud＋モバイルでも確実に動作し、ウィジェット
-# 状態も乱さない。（新しいタブやブックマークからの再訪でも URL ごと残る）
-_PRESET_QP = "presets"
+# 第一者 Cookie（extra-streamlit-components の CookieManager）に保存する。
+# CookieManager は Streamlit と同一オリジンで動くため第一者 Cookie を書け、
+# アプリを完全に閉じても各自の端末（同一ブラウザ）に残る。次回起動時は
+# サーバー側の st.context.cookies から読める（コンポーネント往復不要で安定）。
+_PRESET_COOKIE = "bj_user_presets"
+
+# CookieManager は一度だけ生成。値が変わらない限り再実行を誘発しないため
+# ①②のようなウィジェットリセットは起きない。
+_cookie_manager = stx.CookieManager(key="bj_cookie_mgr") if stx is not None else None
 
 
-def _read_presets_qp():
-    """URL クエリパラメータから保存済みプリセット辞書を復元する（無ければ空辞書）。"""
+def _read_presets_cookie():
+    """保存済みプリセット辞書を復元する（無ければ空辞書）。
+    起動時のHTTPリクエストに第一者Cookieが乗るため、サーバー側で直接読める。"""
+    raw = None
     try:
-        raw = st.query_params.get(_PRESET_QP)
+        raw = st.context.cookies.get(_PRESET_COOKIE)
     except Exception:
         raw = None
     if not raw:
@@ -422,26 +432,25 @@ def _read_presets_qp():
 
 
 if "user_presets" not in st.session_state:
-    # 初回ロード時、URL に載っているプリセットから復元
-    st.session_state["user_presets"] = _read_presets_qp()
+    # 初回ロード時、ブラウザが送ってきた第一者 Cookie から復元
+    st.session_state["user_presets"] = _read_presets_cookie()
 
 
 def _persist_user_presets():
-    """現在の自分用プリセット一覧を URL クエリパラメータへ書き出す。
-    同じ値の再設定は Streamlit 側で無視されるため再実行ループは起きない。"""
+    """現在の自分用プリセット一覧を第一者 Cookie に書き出す（1年間有効）。
+    保存/削除ハンドラ内からのみ呼び、直後に st.rerun() しないこと
+    （set はフロント描画で書き込むため、即 rerun すると取りこぼす）。"""
+    if _cookie_manager is None:
+        return
     presets = st.session_state.get("user_presets", {})
+    payload = quote(json.dumps(presets, ensure_ascii=False))
     try:
-        if presets:
-            st.query_params[_PRESET_QP] = quote(
-                json.dumps(presets, ensure_ascii=False))
-        elif _PRESET_QP in st.query_params:
-            del st.query_params[_PRESET_QP]
+        _cookie_manager.set(
+            _PRESET_COOKIE, payload,
+            key="set_presets", max_age=31536000, same_site="lax",
+        )
     except Exception:
         pass
-
-
-# 毎回、現在のプリセットを URL へ反映（保存/削除→rerun でも確実に永続化）
-_persist_user_presets()
 
 # プリセット保存時に集めるハウスルールのキー一覧
 _HR_KEYS = list(_HR_DEFAULTS.keys())
@@ -645,9 +654,9 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
     st.markdown("**💾 自分用プリセットを保存／呼び出し**")
     st.caption("いま選んでいるルールに名前を付けて保存できます。"
                "次回から上の一覧・「🔰 はじめての方へ」でワンタップ呼び出し。"
-               "※ 保存内容はこのページのURLに残ります。ブラウザを更新しても消えません。"
-               "別の日にも使いたいときは、この画面をブックマーク（ホーム画面に追加）"
-               "しておくと、次回もプリセット付きで開けます。")
+               "※ 保存内容はお使いのブラウザ（第一者Cookie）に残ります。"
+               "アプリを完全に閉じても、同じ端末・同じブラウザなら次回も自動で復元されます"
+               "（別の端末やシークレットモードには引き継がれません）。")
     _save_name = st.text_input(
         "プリセット名", key="hr_preset_name", placeholder="例：六本木○○カジノ")
     _ps1, _ps2 = st.columns(2)
@@ -661,9 +670,10 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
             else:
                 st.session_state["user_presets"][_nm] = {
                     _key: st.session_state[_key] for _key in _HR_KEYS}
-                # 冒頭の _persist_user_presets() が rerun 後に Cookie へ確実に反映する
                 st.session_state["_preset_saved_flag"] = True
-                st.rerun()
+                # Cookie へ書き込み。set はフロント描画で反映されるため、
+                # ここで st.rerun() せず CookieManager の再実行に任せる（取りこぼし防止）。
+                _persist_user_presets()
     with _ps2:
         _user_names = list(st.session_state["user_presets"].keys())
         if _user_names:
@@ -673,7 +683,8 @@ with st.expander("⚙️  ハウスルール設定（クリックで展開）", 
                 del st.session_state["user_presets"][_del]
                 if st.session_state.get("hr_ruleset") == _del:
                     st.session_state["hr_ruleset"] = "カスタム（手動設定）"
-                st.rerun()
+                # 更新後の一覧を Cookie へ反映（即 rerun しない：取りこぼし防止）
+                _persist_user_presets()
         else:
             st.caption("（まだ保存したプリセットはありません）")
 
