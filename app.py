@@ -1057,7 +1057,10 @@ def render_quick_decision(rules, tc):
 
     with st.expander("❓ 期待値（EV）って何？（はじめての方へ）", expanded=False):
         st.markdown(
-            "**EV（期待値）＝その手を100回打ったときの、賭け金1単位あたりの平均的な損益**です。\n\n"
+            "**EV（期待値）＝賭け金1単位につき、その手を1回打つごとに平均でどれだけ"
+            "増減するか**を表す数字です。\n\n"
+            "たとえば **EV −0.05** は、1単位賭けるたびに<strong>平均0.05単位ずつ損する</strong>"
+            "という意味（100回打てば平均で5単位ほどの損になる計算）です。\n\n"
             "- **EVプラス**：長い目で見て<strong>あなたが有利</strong>な場面です。\n"
             "- **EVマイナス**：不利な場面ですが、表示された最善手は"
             "<strong>「数ある選択肢の中で最も損失が小さい打ち方」</strong>です。\n\n"
@@ -1066,7 +1069,8 @@ def render_quick_decision(rules, tc):
             "**毎回いちばん損の小さい（＝EVの高い）手を選び続けること**。"
             "それが長期的に負けを最小化する唯一の方法です。",
             unsafe_allow_html=True)
-        st.caption("※ 1回ごとの勝ち負けは運で上下します。EVは「長く続けたときの平均」の指標です。")
+        st.caption("※ 1回ごとの勝ち負けは運で大きく上下します。EVは「同じ場面を"
+                   "何度も繰り返したときの平均」を表す指標です。")
 
     if total >= 12:
         bd = stand_breakdown(total, dup, rules, tc=tc)
