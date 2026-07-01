@@ -1186,17 +1186,25 @@ def _hl_prompt(text):
         f'font-size:0.95rem;">{text}</div>', unsafe_allow_html=True)
 
 
-def _action_card(best, hand_desc, dup):
-    """最善手の大きな色付きカードを描画する。"""
+def _action_card(best, hand_desc, dup, insurance=False):
+    """最善手の大きな色付きカードを描画する。
+    insurance=True のときは大きな表示を『🛡️インシュランス ⇒ 最善手』にする。"""
     bg = CELL_COLORS.get(best, "#ECEFF1")
     fg = CELL_TEXT.get(best, "#37474F")
+    if insurance:
+        big = (f'🛡️インシュランス<span style="opacity:.55;"> ⇒ </span>'
+               f'{_ACTION_NAMES[best]}')
+        fs = "1.7rem"
+    else:
+        big = _ACTION_NAMES[best]
+        fs = "2.0rem"
     st.markdown(
         f'<div style="background:{bg};border-radius:12px;padding:14px 18px;'
         f'text-align:center;margin:6px 0;">'
         f'<div style="font-size:0.8rem;color:{fg};opacity:0.85;font-weight:600;">'
         f'あなたの手: {hand_desc} ／ ディーラー {_card_name(dup)}</div>'
-        f'<div style="font-size:2.0rem;font-weight:800;color:{fg};line-height:1.25;">'
-        f'{_ACTION_NAMES[best]}</div>'
+        f'<div style="font-size:{fs};font-weight:800;color:{fg};line-height:1.3;">'
+        f'{big}</div>'
         f'<div style="font-size:0.9rem;color:{fg};font-weight:700;">（{best}）</div>'
         f'</div>', unsafe_allow_html=True)
 
@@ -1347,20 +1355,11 @@ def render_quick_decision(rules, tc):
     is_pair = (c1 == c2)
     is_bj = (c1 == 11 and c2 == 10) or (c1 == 10 and c2 == 11)
 
-    # ── インシュランス（ディーラーがA のときだけ・最善手の近くに表示）──
-    if dup == 11:
-        _ins_thr = get_insurance_threshold()
-        _thr_txt = f"+{_ins_thr}" if _ins_thr is not None else "—"
-        if should_take_insurance(tc):
-            st.markdown(
-                '<div style="background:#E3F2FD;border:2px solid #1E88E5;'
-                'border-radius:10px;padding:10px 14px;margin:6px 0;font-weight:700;'
-                f'color:#0D47A1;font-size:0.95rem;">🛡️ インシュランス推奨：TC {tc:+d}'
-                f'（≥ {_thr_txt}）。ディーラーがAなので、まず保険（インシュランス）を取り、'
-                'その後に下の最善手をプレイします。</div>', unsafe_allow_html=True)
-        else:
-            st.caption(f"🛡️ インシュランス：不要（TC {tc:+d} ＜ {_thr_txt}）。"
-                       "ディーラーがAでも、カウントが十分高くない限り保険は取りません。")
+    # ── インシュランス（ディーラーがA のときだけ判定）──
+    # 推奨時は大きなアクション表示に『🛡️インシュランス ⇒ 最善手』として統合。
+    ins_take = (dup == 11 and should_take_insurance(tc))
+    if dup == 11 and not ins_take and not is_bj:
+        st.caption(f"🛡️ インシュランスは不要（TC {tc:+d} ＜ +{get_insurance_threshold()}）。")
 
     if is_bj:
         st.markdown(_table_view_html([p1, p2], du), unsafe_allow_html=True)
@@ -1388,7 +1387,7 @@ def render_quick_decision(rules, tc):
         st.markdown(_table_view_html([p1, p2], du), unsafe_allow_html=True)
         hand_desc = (f"{_card_name(c1)},{_card_name(c2)} = ペア"
                      f"（{'ソフト' if soft2 else 'ハード'}{total2}）")
-        _action_card("P", hand_desc, dup)
+        _action_card("P", hand_desc, dup, insurance=ins_take)
         _reco_details("P", evs2, total2, soft2, pair_rank2, dup, tc, rules)
         st.markdown("---")
         st.markdown("#### ✂️ スプリット後の各ハンドをプレイ")
@@ -1456,7 +1455,7 @@ def render_quick_decision(rules, tc):
         st.markdown("---")
         return
 
-    _action_card(best, hand_desc, dup)
+    _action_card(best, hand_desc, dup, insurance=ins_take)
     _reco_details(best, evs, total, soft, pair_rank, dup, tc, rules)
     st.markdown("---")
 
