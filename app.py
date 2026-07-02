@@ -7,6 +7,7 @@ import json
 import os
 import random
 import tempfile
+import time as _time
 from urllib.parse import quote, unquote
 
 import pandas as pd
@@ -2021,6 +2022,286 @@ def render_stand_breakdown_section(rules, tab1_tc):
         st.dataframe(dlr_df, width='stretch', hide_index=True)
 
 
+# ===========================================================================
+# カウンティング練習（Hi-Lo）— 基礎ドリルは無料、実戦ドリルはPRO
+# ===========================================================================
+_CT_RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+
+
+def _hilo_tag(rank_str):
+    """Hi-Loのタグ（2-6:+1 / 7-9:0 / 10,J,Q,K,A:-1）を返す。"""
+    r = _opt_rank(rank_str)
+    if 2 <= r <= 6:
+        return 1
+    if 7 <= r <= 9:
+        return 0
+    return -1
+
+
+def _ct_stat_row(ok_key, total_key, extra=""):
+    ok = st.session_state.get(ok_key, 0)
+    total = st.session_state.get(total_key, 0)
+    if total:
+        acc = ok / total * 100
+        st.caption(f"成績：{ok} / {total} 問正解（正答率 {acc:.0f}%）{extra}")
+
+
+# ── ① タグ当てドリル（無料） ──────────────────────────────
+def _ct_tag_new():
+    st.session_state["ct_tag_card"] = random.choice(_CT_RANKS)
+
+
+def _ct_tag_answer(ans):
+    ss = st.session_state
+    card = ss["ct_tag_card"]
+    tag = _hilo_tag(card)
+    ss["ct_tag_total"] = ss.get("ct_tag_total", 0) + 1
+    if ans == tag:
+        ss["ct_tag_ok"] = ss.get("ct_tag_ok", 0) + 1
+        ss["ct_tag_streak"] = ss.get("ct_tag_streak", 0) + 1
+    else:
+        ss["ct_tag_streak"] = 0
+    ss["ct_tag_last"] = (card, ans, tag)
+    _ct_tag_new()
+
+
+def _render_tag_drill():
+    ss = st.session_state
+    if "ct_tag_card" not in ss:
+        _ct_tag_new()
+    st.markdown("##### ① タグ当てドリル（基礎・無料）")
+    st.caption("表示されたカードのHi-Loタグ（2〜6=+1／7〜9=0／10・絵札・A=−1）を"
+               "即答する練習です。まずはここから。")
+    st.markdown(_hand_cards_html(ss["ct_tag_card"]), unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.button("−1", key="ct_tag_m", width='stretch',
+              on_click=_ct_tag_answer, args=(-1,))
+    c2.button("0", key="ct_tag_z", width='stretch',
+              on_click=_ct_tag_answer, args=(0,))
+    c3.button("+1", key="ct_tag_p", width='stretch',
+              on_click=_ct_tag_answer, args=(1,))
+    last = ss.get("ct_tag_last")
+    if last:
+        card, ans, tag = last
+        tag_s = f"{tag:+d}" if tag else "0"
+        ans_s = f"{ans:+d}" if ans else "0"
+        if ans == tag:
+            st.success(f"⭕ 正解！ {card} のタグは {tag_s}"
+                       f"（連続 {ss.get('ct_tag_streak', 0)} 問正解中）")
+        else:
+            st.error(f"❌ {card} のタグは {tag_s} でした（あなたの回答：{ans_s}）")
+    _ct_stat_row("ct_tag_ok", "ct_tag_total")
+
+
+# ── ② デッキ・カウントダウン（基礎=無料／速度・複数枚=PRO） ─────────
+_CT_CD_HIDE = 3  # 最後に伏せる枚数。ここまでのRCを当てる
+
+
+def _ct_cd_start(per):
+    ss = st.session_state
+    deck = _CT_RANKS * 4
+    random.shuffle(deck)
+    ss["ct_cd_deck"] = deck
+    ss["ct_cd_pos"] = 0
+    ss["ct_cd_per"] = per
+    ss["ct_cd_stage"] = "run"
+    ss["ct_cd_t0"] = _time.time()
+    ss["ct_cd_current"] = []
+    ss["ct_cd_done_after_show"] = False
+    _ct_cd_next()
+
+
+def _ct_cd_next():
+    ss = st.session_state
+    deck, pos, per = ss["ct_cd_deck"], ss["ct_cd_pos"], ss["ct_cd_per"]
+    limit = len(deck) - _CT_CD_HIDE
+    take = min(per, limit - pos)
+    if take <= 0:
+        ss["ct_cd_stage"] = "answer"
+        ss["ct_cd_elapsed"] = _time.time() - ss["ct_cd_t0"]
+        return
+    ss["ct_cd_current"] = deck[pos:pos + take]
+    ss["ct_cd_pos"] = pos + take
+    if ss["ct_cd_pos"] >= limit:
+        ss["ct_cd_done_after_show"] = True
+
+
+def _ct_cd_reveal():
+    ss = st.session_state
+    ss["ct_cd_stage"] = "answer"
+    ss["ct_cd_elapsed"] = _time.time() - ss["ct_cd_t0"]
+
+
+def _ct_cd_reset():
+    st.session_state["ct_cd_stage"] = "idle"
+
+
+def _render_countdown_drill(pro):
+    ss = st.session_state
+    st.markdown("##### ② デッキ・カウントダウン" + ("（実戦・PRO）" if pro else "（基礎・無料）"))
+    st.caption(f"1デッキ52枚のうち{52 - _CT_CD_HIDE}枚を順にめくり、頭の中でRC"
+               f"（ランニングカウント）を足し続けます。最後の{_CT_CD_HIDE}枚は伏せたまま、"
+               "あなたのRCを答えてください。")
+    per = 1
+    if pro:
+        per = st.radio("1回にめくる枚数（多いほど実戦的：2枚は打ち消しペア認識の練習）",
+                       [1, 2, 3], horizontal=True, key="ct_cd_per_sel")
+    stage = ss.get("ct_cd_stage", "idle")
+    if stage == "idle":
+        st.button("🔀 シャッフルして開始", key="ct_cd_go", type="primary",
+                  on_click=_ct_cd_start, args=(per,))
+        extra = ""
+        if pro and ss.get("ct_cd_best") is not None:
+            extra = f"　⏱ 自己ベスト {ss['ct_cd_best']:.1f}秒"
+        _ct_stat_row("ct_cd_ok", "ct_cd_total", extra)
+        return
+    if stage == "run":
+        shown = ss["ct_cd_pos"]
+        limit = 52 - _CT_CD_HIDE
+        st.progress(shown / limit, text=f"{shown} / {limit} 枚")
+        st.markdown(_hand_cards_html(*ss["ct_cd_current"]), unsafe_allow_html=True)
+        if ss.get("ct_cd_done_after_show"):
+            st.button("これで全部 → RCを答える", key="ct_cd_fin", type="primary",
+                      width='stretch', on_click=_ct_cd_reveal)
+        else:
+            st.button("次のカード ▶", key="ct_cd_nx", type="primary",
+                      width='stretch', on_click=_ct_cd_next)
+        st.button("最初からやり直す", key="ct_cd_re", on_click=_ct_cd_reset)
+        return
+    # answer
+    deck = ss["ct_cd_deck"]
+    true_rc = sum(_hilo_tag(c) for c in deck[:52 - _CT_CD_HIDE])
+    ans = st.number_input("あなたのRCは？", min_value=-20, max_value=20,
+                          value=0, step=1, key="ct_cd_ans")
+    if st.button("判定する", key="ct_cd_judge", type="primary"):
+        ss["ct_cd_total"] = ss.get("ct_cd_total", 0) + 1
+        elapsed = ss.get("ct_cd_elapsed", 0.0)
+        if int(ans) == true_rc:
+            ss["ct_cd_ok"] = ss.get("ct_cd_ok", 0) + 1
+            msg = f"⭕ 正解！ RC = {true_rc:+d}"
+            if pro:
+                best = ss.get("ct_cd_best")
+                if best is None or elapsed < best:
+                    ss["ct_cd_best"] = elapsed
+                    msg += f"　⏱ {elapsed:.1f}秒（自己ベスト更新！）"
+                else:
+                    msg += f"　⏱ {elapsed:.1f}秒（自己ベスト {best:.1f}秒）"
+            st.success(msg)
+            st.balloons()
+        else:
+            st.error(f"❌ 正しいRCは {true_rc:+d} でした（あなたの回答：{int(ans):+d}）")
+            if pro:
+                st.caption(f"⏱ 所要 {ss.get('ct_cd_elapsed', 0.0):.1f}秒")
+        ss["ct_cd_stage"] = "idle"
+        _ct_stat_row("ct_cd_ok", "ct_cd_total")
+
+
+# ── ③ TC換算ドリル（PRO） ────────────────────────────────
+def _ct_tc_new():
+    ss = st.session_state
+    while True:
+        rc = random.randint(-12, 12)
+        decks = random.choice([1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0])
+        if rc == 0:
+            continue
+        v = rc / decks
+        # ちょうど .5 になる曖昧な問題（四捨五入の流儀差が出る）は避ける
+        if abs(abs(v) - int(abs(v)) - 0.5) < 1e-9:
+            continue
+        ss["ct_tc_rc"], ss["ct_tc_decks"] = rc, decks
+        return
+
+
+def _render_tc_drill():
+    ss = st.session_state
+    if "ct_tc_rc" not in ss:
+        _ct_tc_new()
+    st.markdown("##### ③ TC換算ドリル（実戦・PRO）")
+    st.caption("RC（ランニングカウント）を残りデッキ数で割ってTC（トゥルーカウント）に"
+               "変換する暗算練習。ベット判断の心臓部です。答えは四捨五入した整数で。")
+    rc, decks = ss["ct_tc_rc"], ss["ct_tc_decks"]
+    st.markdown(f"**RC = {rc:+d}　／　残り約 {decks:g} デッキ** → TCは？")
+    ans = st.number_input("TC（整数）", min_value=-15, max_value=15, value=0,
+                          step=1, key="ct_tc_ans")
+    c1, c2 = st.columns(2)
+    if c1.button("判定する", key="ct_tc_judge", type="primary", width='stretch'):
+        true_tc = round(rc / decks)
+        ss["ct_tc_total"] = ss.get("ct_tc_total", 0) + 1
+        if int(ans) == true_tc:
+            ss["ct_tc_ok"] = ss.get("ct_tc_ok", 0) + 1
+            st.success(f"⭕ 正解！ {rc:+d} ÷ {decks:g} ≒ TC {true_tc:+d}")
+        else:
+            st.error(f"❌ {rc:+d} ÷ {decks:g} = {rc / decks:+.2f} → "
+                     f"TC {true_tc:+d} でした")
+        _ct_tc_new()
+    c2.button("次の問題", key="ct_tc_skip", width='stretch', on_click=_ct_tc_new)
+    _ct_stat_row("ct_tc_ok", "ct_tc_total")
+    st.caption("※ 実戦ではベット目的なら0方向へ切り捨てる保守的な流儀もあります。"
+               "本ドリルは四捨五入で統一しています。")
+
+
+# ── ④ インデックス・クイズ（PRO） ─────────────────────────
+def _ct_ix_new(filtered):
+    st.session_state["ct_ix_q"] = random.choice(filtered)
+
+
+def _render_index_quiz(rules):
+    ss = st.session_state
+    st.markdown("##### ④ インデックス・クイズ（実戦・PRO）")
+    st.caption("現在のハウスルールで実際に使えるインデックスプレイの「発動TC」を"
+               "当てるクイズ。Illustrious 18 / Fab 4 を体で覚えます。")
+    filtered = get_filtered_indexes(rules)
+    if not filtered:
+        st.info("現在のハウスルールでは発動するインデックスプレイがありません。")
+        return
+    if "ct_ix_q" not in ss or ss.get("ct_ix_rules") != rules.short_description():
+        _ct_ix_new(filtered)
+        ss["ct_ix_rules"] = rules.short_description()
+    h, d, thr, a, direction = ss["ct_ix_q"]
+    d_label = _up_label(d) if isinstance(d, int) else d
+    op = "以上" if direction == "+" else "以下"
+    st.markdown(f"**{h} vs ディーラー {d_label}** → **{a}** に変えるのは "
+                f"**TCがいくつ{op}**のとき？")
+    ans = st.number_input("発動TC（整数）", min_value=-10, max_value=10, value=0,
+                          step=1, key="ct_ix_ans")
+    c1, c2 = st.columns(2)
+    if c1.button("判定する", key="ct_ix_judge", type="primary", width='stretch'):
+        ss["ct_ix_total"] = ss.get("ct_ix_total", 0) + 1
+        if int(ans) == thr:
+            ss["ct_ix_ok"] = ss.get("ct_ix_ok", 0) + 1
+            st.success(f"⭕ 正解！ {h} vs {d_label} は TC {thr:+d} {op}で {a}")
+        else:
+            st.error(f"❌ 正しくは TC {thr:+d} {op}で {a} でした")
+        _ct_ix_new(filtered)
+    c2.button("次の問題", key="ct_ix_skip", width='stretch',
+              on_click=_ct_ix_new, args=(filtered,))
+    _ct_stat_row("ct_ix_ok", "ct_ix_total")
+
+
+def render_counting_trainer(rules):
+    st.markdown("##### 🔢 カウンティング練習（Hi-Lo）")
+    st.caption("カウンティングは合法な記憶・観察技術ですが、カジノ側が嫌えば"
+               "バックオフ（プレイ拒否）される代償もあります。また**CSM卓（毎ハンド"
+               "シャッフル）では効果がありません**。仕組みは「用語集」タブへ。")
+    _render_tag_drill()
+    st.markdown("---")
+    # PROなら同じカウントダウンが速度計測・複数枚対応にアップグレードされる
+    _render_countdown_drill(pro=IS_PRO)
+    st.markdown("---")
+    if not IS_PRO:
+        _pro_locked_notice("カウンティング実戦ドリル")
+        st.markdown(
+            "PRO版の実戦ドリルでは、さらに次の練習ができます：\n\n"
+            "- ⏱ **スピード計測カウントダウン**（所要秒数と自己ベストを記録）\n"
+            "- 🃏 **複数枚めくり**（2〜3枚同時。打ち消しペアを一瞬で認識する実戦技術）\n"
+            "- ➗ **TC換算ドリル**（RC→TCの暗算。ベット判断の心臓部）\n"
+            "- 🎯 **インデックス・クイズ**（あなたの卓のルールで実際に使える例外プレイを暗記）")
+        return
+    _render_tc_drill()
+    st.markdown("---")
+    _render_index_quiz(rules)
+
+
 # 表示順：無料の2タブ（戦略・ガイド）を先頭に、PRO3タブ（🔒）を後方にまとめる。
 # 変数名（tab1..tab5）は各コンテンツblockと対応づけたまま、ラベル順のみ並べ替える。
 tab1, tab5, tab2, tab3, tab4 = st.tabs([
@@ -2055,13 +2336,16 @@ with tab1:
         display_table, changed_cells = apply_tc_overlay(strategy_table, tab1_tc, rules)
     ev_table = generate_ev_table(display_table, rules, tc=tab1_tc) if show_ev else None
 
-    _sub_q, _sub_tr, _sub_t, _sub_b = st.tabs(
-        ["⚡ クイック判定", "🎓 トレーニング", "📊 早見表（全パターン）", "🎯 勝敗内訳"])
+    _sub_q, _sub_tr, _sub_ct, _sub_t, _sub_b = st.tabs(
+        ["⚡ クイック判定", "🎓 トレーニング", "🔢 カウンティング練習",
+         "📊 早見表（全パターン）", "🎯 勝敗内訳"])
     with _sub_q:
         render_quick_decision(rules, tab1_tc)
         _render_line_cta()
     with _sub_tr:
         render_trainer(rules, tab1_tc)
+    with _sub_ct:
+        render_counting_trainer(rules)
     with _sub_t:
         render_bs_tables(display_table, ev_table, changed_cells, tab1_tc, show_ev, rules)
     with _sub_b:
