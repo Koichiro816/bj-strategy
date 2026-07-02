@@ -1203,35 +1203,59 @@ def _card_name(r: int) -> str:
     return "A" if r == 11 else str(r)
 
 
-def _rank_card_html(rank):
-    """選んだランクをシンプルなカード（白地にランク表記のみ・スート無し）で描画。
+# 見た目用のスート。戦略には影響しないため、カードの並び位置から機械的に
+# 割り当てる（ペアやディーラーと重複しにくい順序）。色は実物どおり赤/黒。
+_SUIT_CYCLE = ("♠", "♥", "♣", "♦")
+_SUIT_COLOR = {"♠": "#1C2833", "♣": "#1C2833", "♥": "#C0392B", "♦": "#C0392B"}
+
+
+def _rank_card_html(rank, suit_idx=0):
+    """選んだランクをトランプ風カード（角インデックス＋中央スートピップ）で描画。
     10バリューは「10,J,Q,K」を1枚にまとめて表示する。rank が None のときは
     未選択を表す空欄の点線枠を描画する。"""
-    W, H = 58, 82
+    W, H = 60, 86
     if rank is None:
         return (
             f'<div style="width:{W}px;height:{H}px;border:2px dashed #cfcfcf;'
-            f'border-radius:7px;background:#fafafa;display:flex;align-items:center;'
+            f'border-radius:8px;background:#fafafa;display:flex;align-items:center;'
             f'justify-content:center;color:#c0c0c0;font-size:22px;flex:0 0 auto;">?'
             f'</div>')
+    suit = _SUIT_CYCLE[suit_idx % len(_SUIT_CYCLE)]
+    color = _SUIT_COLOR[suit]
+    idx_label = "10" if rank == _TEN_OPT else rank
+    ifs = 13 if idx_label == "10" else 15
+    corner = (
+        f'<div style="line-height:1;text-align:center;">'
+        f'<div style="font-size:{ifs}px;font-weight:800;'
+        f'font-family:Georgia,\'Times New Roman\',serif;">{idx_label}</div>'
+        f'<div style="font-size:11px;margin-top:1px;">{suit}</div></div>')
     if rank == _TEN_OPT:
-        inner = ('<span style="font-size:21px;font-weight:800;line-height:1;">10</span>'
-                 '<span style="font-size:12px;font-weight:700;letter-spacing:2px;'
-                 'margin-top:3px;">J Q K</span>')
+        center = (
+            f'<div style="text-align:center;line-height:1;">'
+            f'<div style="font-size:24px;">{suit}</div>'
+            f'<div style="font-size:8.5px;font-weight:700;color:#90A4AE;'
+            f'letter-spacing:1.5px;margin-top:4px;">J·Q·K</div></div>')
     else:
-        fs = 32 if len(rank) == 1 else 27
-        inner = f'<span style="font-size:{fs}px;font-weight:800;line-height:1;">{rank}</span>'
+        center = f'<div style="font-size:28px;line-height:1;">{suit}</div>'
     return (
-        f'<div style="width:{W}px;height:{H}px;border:1px solid #9e9e9e;border-radius:7px;'
-        f'background:linear-gradient(180deg,#fff 0%,#f4f4f4 100%);'
-        f'box-shadow:0 1px 4px rgba(0,0,0,.25);display:flex;flex-direction:column;'
-        f'align-items:center;justify-content:center;color:#111;flex:0 0 auto;">{inner}</div>')
+        f'<div style="position:relative;width:{W}px;height:{H}px;'
+        f'border:1px solid #90A4AE;border-radius:8px;'
+        f'background:linear-gradient(155deg,#ffffff 0%,#fcfcfc 60%,#eef1f3 100%);'
+        f'box-shadow:0 2px 5px rgba(0,0,0,.28),inset 0 0 0 2px #ffffff;'
+        f'color:{color};display:flex;align-items:center;justify-content:center;'
+        f'flex:0 0 auto;">'
+        f'<div style="position:absolute;top:5px;left:6px;">{corner}</div>'
+        f'{center}'
+        f'<div style="position:absolute;bottom:5px;right:6px;'
+        f'transform:rotate(180deg);">{corner}</div>'
+        f'</div>')
 
 
-def _hand_cards_html(*ranks):
-    """選んだランク群をカードとして横並びで描画する。"""
-    cards = "".join(_rank_card_html(r) for r in ranks)
-    return (f'<div style="display:flex;gap:8px;justify-content:center;'
+def _hand_cards_html(*ranks, suit_offset=0):
+    """選んだランク群をカードとして横並びで描画する。
+    suit_offset で見た目のスートの開始位置をずらす（ディーラー/複数ハンド用）。"""
+    cards = "".join(_rank_card_html(r, suit_offset + i) for i, r in enumerate(ranks))
+    return (f'<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;'
             f'margin:4px 0 2px;">{cards}</div>')
 
 
@@ -1242,7 +1266,7 @@ def _table_view_html(player_ranks, du):
     return (
         f'<div style="margin:8px 0 2px;">'
         f'<div style="{lbl}">ディーラー</div>'
-        f'{_hand_cards_html(du)}'
+        f'{_hand_cards_html(du, suit_offset=3)}'
         f'<div style="border-top:1px dashed #B0BEC5;width:72%;margin:9px auto;"></div>'
         f'<div style="{lbl}">あなたの手札</div>'
         f'{_hand_cards_html(*player_ranks)}'
@@ -1516,7 +1540,9 @@ def _play_split_hand(title, prefix, pair_opt, du, dup, rules, tc):
             continue
         break
 
-    st.markdown(_hand_cards_html(*picks), unsafe_allow_html=True)
+    st.markdown(
+        _hand_cards_html(*picks, suit_offset=(1 if prefix.endswith("b") else 0)),
+        unsafe_allow_html=True)
     if awaiting:
         return
     names = ",".join(_card_name(_opt_rank(p)) for p in picks)
@@ -1822,7 +1848,7 @@ def render_trainer(rules, tc):
     _lbl = ('font-size:0.72rem;color:#607D8B;font-weight:700;text-align:center;'
             'letter-spacing:1px;')
     _html = (f'<div style="margin:8px 0 2px;"><div style="{_lbl}">ディーラー</div>'
-             f'{_hand_cards_html(du)}'
+             f'{_hand_cards_html(du, suit_offset=3)}'
              f'<div style="border-top:1px dashed #B0BEC5;width:72%;margin:9px auto;">'
              f'</div>')
     for i, hh in enumerate(hands):
@@ -1832,7 +1858,8 @@ def render_trainer(rules, tc):
             tag = f'ハンド{i + 1}（{state}）'
         else:
             tag = "あなたの手札"
-        _html += f'<div style="{_lbl}">{tag}</div>{_hand_cards_html(*hh["cards"])}'
+        _html += (f'<div style="{_lbl}">{tag}</div>'
+                  f'{_hand_cards_html(*hh["cards"], suit_offset=i)}')
     _html += '</div>'
     st.markdown(_html, unsafe_allow_html=True)
 
